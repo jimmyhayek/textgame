@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.StateManager = void 0;
-class StateManager {
+export class StateManager {
     constructor(initialState = {}) {
         this.state = this.createInitialState(initialState);
     }
@@ -36,4 +33,3 @@ class StateManager {
         };
     }
 }
-exports.StateManager = StateManager;

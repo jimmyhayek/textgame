@@ -1,4 +1,4 @@
-import { GameEngine } from '../../../packages/core/dist/index.js';
+import { GameEngine } from '@textgame/core';
 import { gameScenes } from './scenes.js';
 
 // DOM elements

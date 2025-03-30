@@ -1,19 +1,16 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GameEngine = void 0;
-const EventEmitter_1 = require("./EventEmitter");
-const StateManager_1 = require("./StateManager");
-const SceneManager_1 = require("./SceneManager");
-const EffectManager_1 = require("./EffectManager");
-class GameEngine {
+import { EventEmitter } from './EventEmitter';
+import { StateManager } from './StateManager';
+import { SceneManager } from './SceneManager';
+import { EffectManager } from './EffectManager';
+export class GameEngine {
     constructor(options = {}) {
         this.plugins = new Map();
         this.isRunning = false;
         const { scenes = [], initialState = {} } = options;
-        this.eventEmitter = new EventEmitter_1.EventEmitter();
-        this.stateManager = new StateManager_1.StateManager(initialState);
-        this.sceneManager = new SceneManager_1.SceneManager(scenes);
-        this.effectManager = new EffectManager_1.EffectManager();
+        this.eventEmitter = new EventEmitter();
+        this.stateManager = new StateManager(initialState);
+        this.sceneManager = new SceneManager(scenes);
+        this.effectManager = new EffectManager();
     }
     start(initialSceneId) {
         const success = this.sceneManager.transitionToScene(initialSceneId, this.stateManager.getState(), this);
@@ -111,4 +108,3 @@ class GameEngine {
         return this.effectManager;
     }
 }
-exports.GameEngine = GameEngine;

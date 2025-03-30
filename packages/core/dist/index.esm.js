@@ -1,7 +1,3 @@
-'use strict';
-
-Object.defineProperty(exports, '__esModule', { value: true });
-
 class EventEmitter {
     constructor() {
         this.listeners = new Map();
@@ -264,9 +260,5 @@ class GameEngine {
     }
 }
 
-exports.EffectManager = EffectManager;
-exports.EventEmitter = EventEmitter;
-exports.GameEngine = GameEngine;
-exports.SceneManager = SceneManager;
-exports.StateManager = StateManager;
-//# sourceMappingURL=index.js.map
+export { EffectManager, EventEmitter, GameEngine, SceneManager, StateManager };
+//# sourceMappingURL=index.esm.js.map

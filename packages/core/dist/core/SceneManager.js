@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SceneManager = void 0;
-class SceneManager {
+export class SceneManager {
     constructor(scenes = []) {
         this.scenes = new Map();
         this.currentSceneId = null;
@@ -49,4 +46,3 @@ class SceneManager {
         });
     }
 }
-exports.SceneManager = SceneManager;

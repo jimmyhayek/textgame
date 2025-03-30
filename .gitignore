@@ -1,4 +1,5 @@
 .idea
 node_modules
+coverage
 /e2e-tests/cypress/screenshots
 /e2e-tests/cypress/videos

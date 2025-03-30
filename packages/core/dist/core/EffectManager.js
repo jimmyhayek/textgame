@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EffectManager = void 0;
-class EffectManager {
+export class EffectManager {
     constructor() {
         this.effectProcessors = new Map();
         this.registerDefaultEffects();
@@ -44,4 +41,3 @@ class EffectManager {
         }
     }
 }
-exports.EffectManager = EffectManager;

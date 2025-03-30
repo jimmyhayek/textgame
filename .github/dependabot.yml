@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Enable version updates for npm
+  - package-ecosystem: "npm"
+    # Look for package.json and package-lock.json files in the root directory
+    directory: "/"
+    # Check for updates once a week
+    schedule:
+      interval: "weekly"
+    # Allow up to 10 open pull requests for npm dependencies
+    open-pull-requests-limit: 10
+    # Group dependencies where possible
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*eslint*"
+          - "*jest*"
+          - "*test*"
+      production-dependencies:
+        patterns:
+          - "!*eslint*"
+          - "!*jest*"
+          - "!*test*"
+
+  # Also check for npm updates in the core package
+  - package-ecosystem: "npm"
+    directory: "/packages/core"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # GitHub Actions updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

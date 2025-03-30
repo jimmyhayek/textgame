@@ -1,0 +1,20 @@
+{
+  "name": "@textgame/example-vue",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@textgame/core": "^0.1.0",
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@testing-library/vue": "^7.0.0",
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.3.9",
+    "vitest": "^0.32.0"
+  }
+}

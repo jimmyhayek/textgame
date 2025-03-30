@@ -52,14 +52,14 @@ jobs:
           config: baseUrl=http://localhost:5173
 
       - name: Upload screenshots (on failure)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: cypress-screenshots-${{ matrix.example }}
           path: e2e-tests/cypress/screenshots
 
       - name: Upload videos
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cypress-videos-${{ matrix.example }}

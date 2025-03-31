@@ -17,6 +17,6 @@
     "cypress": "^12.14.0",
     "cypress-grep": "^3.0.0",
     "cypress-localstorage-commands": "^2.2.2",
-    "wait-on": "^7.0.1"
+    "wait-on": "^8.0.3"
   }
 }

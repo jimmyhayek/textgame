@@ -17,6 +17,6 @@
     "dev:svelte": "cd examples/svelte && npm run dev"
   },
   "devDependencies": {
-    "lerna": "^4.0.0"
+    "lerna": "^8.2.1"
   }
 }

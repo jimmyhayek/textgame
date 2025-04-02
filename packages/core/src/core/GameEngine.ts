@@ -1,31 +1,37 @@
-import { Scene, Choice, GameState, Effect, Plugin, GameEventType, EventListener } from '../types';
+import { GameState, Choice, Scene, SceneId, Effect, Plugin, GameEventType, EventListener } from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
 import { EffectManager } from './EffectManager';
+import { ContentLoader } from './ContentLoader';
+import { PluginManager } from './PluginManager';
+
+export interface GameEngineOptions {
+    initialState?: Partial<GameState>;
+}
 
 export class GameEngine {
-    private sceneManager: SceneManager;
-    private stateManager: StateManager;
     private eventEmitter: EventEmitter;
+    private stateManager: StateManager;
+    private contentLoader: ContentLoader;
+    private sceneManager: SceneManager;
     private effectManager: EffectManager;
-    private plugins: Map<string, Plugin> = new Map();
+    private pluginManager: PluginManager;
     private isRunning: boolean = false;
 
-    constructor(options: {
-        scenes?: Scene[];
-        initialState?: Partial<GameState>;
-    } = {}) {
-        const { scenes = [], initialState = {} } = options;
+    constructor(options: GameEngineOptions = {}) {
+        const { initialState = {} } = options;
 
         this.eventEmitter = new EventEmitter();
         this.stateManager = new StateManager(initialState);
-        this.sceneManager = new SceneManager(scenes);
+        this.contentLoader = new ContentLoader();
+        this.sceneManager = new SceneManager(this.contentLoader);
         this.effectManager = new EffectManager();
+        this.pluginManager = new PluginManager(this);
     }
 
-    public start(initialSceneId: string): void {
-        const success = this.sceneManager.transitionToScene(
+    public async start(initialSceneId: SceneId): Promise<void> {
+        const success = await this.sceneManager.transitionToScene(
             initialSceneId,
             this.stateManager.getState(),
             this
@@ -34,10 +40,13 @@ export class GameEngine {
         if (success) {
             this.isRunning = true;
             this.eventEmitter.emit('gameStarted', { sceneId: initialSceneId });
+            this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
+        } else {
+            console.error(`Failed to start game at scene '${initialSceneId}'`);
         }
     }
 
-    public selectChoice(choiceId: string): void {
+    public async selectChoice(choiceId: string): Promise<void> {
         const currentScene = this.sceneManager.getCurrentScene();
         if (!currentScene) return;
 
@@ -69,7 +78,7 @@ export class GameEngine {
             nextSceneId = choice.nextScene;
         }
 
-        const success = this.sceneManager.transitionToScene(
+        const success = await this.sceneManager.transitionToScene(
             nextSceneId,
             this.stateManager.getState(),
             this
@@ -104,6 +113,18 @@ export class GameEngine {
         return this.sceneManager.getAvailableChoices(this.stateManager.getState());
     }
 
+    public registerPlugin(plugin: Plugin): void {
+        this.pluginManager.registerPlugin(plugin);
+    }
+
+    public unregisterPlugin(pluginName: string): void {
+        this.pluginManager.unregisterPlugin(pluginName);
+    }
+
+    public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
+        return this.pluginManager.getPlugin<T>(pluginName);
+    }
+
     public registerEffectProcessor(
         effectType: string,
         processor: (effect: Effect, state: GameState) => void
@@ -111,32 +132,8 @@ export class GameEngine {
         this.effectManager.registerEffectProcessor(effectType, processor);
     }
 
-    public registerScenes(scenes: Scene[]): void {
-        this.sceneManager.registerScenes(scenes);
-    }
-
-    public registerPlugin(plugin: Plugin): void {
-        if (this.plugins.has(plugin.name)) {
-            console.warn(`Plugin with name '${plugin.name}' is already registered.`);
-            return;
-        }
-
-        this.plugins.set(plugin.name, plugin);
-        plugin.initialize(this);
-    }
-
-    public unregisterPlugin(pluginName: string): void {
-        const plugin = this.plugins.get(pluginName);
-        if (plugin) {
-            if (plugin.destroy) {
-                plugin.destroy();
-            }
-            this.plugins.delete(pluginName);
-        }
-    }
-
-    public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
-        return this.plugins.get(pluginName) as T | undefined;
+    public getContentLoader(): ContentLoader {
+        return this.contentLoader;
     }
 
     public getEventEmitter(): EventEmitter {
@@ -153,5 +150,9 @@ export class GameEngine {
 
     public getEffectManager(): EffectManager {
         return this.effectManager;
+    }
+
+    public getPluginManager(): PluginManager {
+        return this.pluginManager;
     }
 }

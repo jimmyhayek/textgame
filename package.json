@@ -12,9 +12,7 @@
     "lint": "lerna run lint",
     "e2e": "cd e2e-tests && npm run test",
     "dev:vanilla": "cd examples/vanilla && npm run dev",
-    "dev:react": "cd examples/react && npm run dev",
-    "dev:vue": "cd examples/vue && npm run dev",
-    "dev:svelte": "cd examples/svelte && npm run dev"
+    "dev:vue": "cd examples/vue && npm run dev"
   },
   "devDependencies": {
     "lerna": "^4.0.0"

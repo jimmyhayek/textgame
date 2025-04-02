@@ -1,7 +1,7 @@
-import { Effect, GameState } from '../types';
+import { Effect, EffectProcessor, GameState } from '../types';
 
 export class EffectManager {
-    private effectProcessors: Map<string, (effect: Effect, state: GameState) => void> = new Map();
+    private effectProcessors: Map<string, EffectProcessor> = new Map();
 
     constructor() {
         this.registerDefaultEffects();
@@ -30,10 +30,7 @@ export class EffectManager {
         });
     }
 
-    public registerEffectProcessor(
-        effectType: string,
-        processor: (effect: Effect, state: GameState) => void
-    ): void {
+    public registerEffectProcessor(effectType: string, processor: EffectProcessor): void {
         this.effectProcessors.set(effectType, processor);
     }
 

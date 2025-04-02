@@ -1,4 +1,13 @@
-import { GameState, Choice, Scene, SceneId, Effect, Plugin, GameEventType, EventListener } from '../types';
+import {
+  GameState,
+  Choice,
+  Scene,
+  SceneId,
+  Effect,
+  Plugin,
+  GameEventType,
+  EventListener,
+} from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
@@ -7,152 +16,156 @@ import { ContentLoader } from './ContentLoader';
 import { PluginManager } from './PluginManager';
 
 export interface GameEngineOptions {
-    initialState?: Partial<GameState>;
+  initialState?: Partial<GameState>;
 }
 
 export class GameEngine {
-    private eventEmitter: EventEmitter;
-    private stateManager: StateManager;
-    private contentLoader: ContentLoader;
-    private sceneManager: SceneManager;
-    private effectManager: EffectManager;
-    private pluginManager: PluginManager;
-    private isRunning: boolean = false;
+  private readonly eventEmitter: EventEmitter;
+  private readonly stateManager: StateManager;
+  private readonly contentLoader: ContentLoader;
+  private readonly sceneManager: SceneManager;
+  private readonly effectManager: EffectManager;
+  private readonly pluginManager: PluginManager;
+  private isRunning: boolean = false;
 
-    constructor(options: GameEngineOptions = {}) {
-        const { initialState = {} } = options;
+  constructor(options: GameEngineOptions = {}) {
+    const { initialState = {} } = options;
 
-        this.eventEmitter = new EventEmitter();
-        this.stateManager = new StateManager(initialState);
-        this.contentLoader = new ContentLoader();
-        this.sceneManager = new SceneManager(this.contentLoader);
-        this.effectManager = new EffectManager();
-        this.pluginManager = new PluginManager(this);
+    this.eventEmitter = new EventEmitter();
+    this.stateManager = new StateManager(initialState);
+    this.contentLoader = new ContentLoader();
+    this.sceneManager = new SceneManager(this.contentLoader);
+    this.effectManager = new EffectManager();
+    this.pluginManager = new PluginManager(this);
+  }
+
+  public async start(initialSceneId: SceneId): Promise<void> {
+    const success = await this.sceneManager.transitionToScene(
+      initialSceneId,
+      this.stateManager.getState(),
+      this
+    );
+
+    if (success) {
+      this.isRunning = true;
+      this.eventEmitter.emit('gameStarted', { sceneId: initialSceneId });
+      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
+    } else {
+      console.error(`Failed to start game at scene '${initialSceneId}'`);
+    }
+  }
+
+  public isGameRunning(): boolean {
+    return this.isRunning;
+  }
+
+  public async selectChoice(choiceId: string): Promise<void> {
+    const currentScene = this.sceneManager.getCurrentScene();
+    if (!currentScene) return;
+
+    const choice = currentScene.choices.find(c => c.id === choiceId);
+    if (!choice) {
+      console.error(`Choice with ID '${choiceId}' not found in current scene.`);
+      return;
     }
 
-    public async start(initialSceneId: SceneId): Promise<void> {
-        const success = await this.sceneManager.transitionToScene(
-            initialSceneId,
-            this.stateManager.getState(),
-            this
-        );
-
-        if (success) {
-            this.isRunning = true;
-            this.eventEmitter.emit('gameStarted', { sceneId: initialSceneId });
-            this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
-        } else {
-            console.error(`Failed to start game at scene '${initialSceneId}'`);
-        }
+    if (choice.condition && !choice.condition(this.stateManager.getState())) {
+      console.warn(`Choice with ID '${choiceId}' is not available.`);
+      return;
     }
 
-    public async selectChoice(choiceId: string): Promise<void> {
-        const currentScene = this.sceneManager.getCurrentScene();
-        if (!currentScene) return;
+    this.eventEmitter.emit('choiceSelected', { choice });
 
-        const choice = currentScene.choices.find(c => c.id === choiceId);
-        if (!choice) {
-            console.error(`Choice with ID '${choiceId}' not found in current scene.`);
-            return;
-        }
+    if (choice.effects && choice.effects.length > 0) {
+      this.stateManager.updateState(state => {
+        this.effectManager.applyEffects(choice.effects!, state);
+      });
 
-        if (choice.condition && !choice.condition(this.stateManager.getState())) {
-            console.warn(`Choice with ID '${choiceId}' is not available.`);
-            return;
-        }
-
-        this.eventEmitter.emit('choiceSelected', { choice });
-
-        if (choice.effects && choice.effects.length > 0) {
-            this.stateManager.updateState(state => {
-                this.effectManager.applyEffects(choice.effects!, state);
-            });
-
-            this.eventEmitter.emit('stateChanged', this.stateManager.getState());
-        }
-
-        let nextSceneId: string;
-        if (typeof choice.nextScene === 'function') {
-            nextSceneId = choice.nextScene(this.stateManager.getState());
-        } else {
-            nextSceneId = choice.nextScene;
-        }
-
-        const success = await this.sceneManager.transitionToScene(
-            nextSceneId,
-            this.stateManager.getState(),
-            this
-        );
-
-        if (success) {
-            this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
-        }
+      this.eventEmitter.emit('stateChanged', this.stateManager.getState());
     }
 
-    public on(eventType: GameEventType, listener: EventListener): void {
-        this.eventEmitter.on(eventType, listener);
+    let nextSceneId: string;
+    if (typeof choice.nextScene === 'function') {
+      nextSceneId = choice.nextScene(this.stateManager.getState());
+    } else {
+      nextSceneId = choice.nextScene;
     }
 
-    public off(eventType: GameEventType, listener: EventListener): void {
-        this.eventEmitter.off(eventType, listener);
-    }
+    const success = await this.sceneManager.transitionToScene(
+      nextSceneId,
+      this.stateManager.getState(),
+      this
+    );
 
-    public emit(eventType: GameEventType, data?: any): void {
-        this.eventEmitter.emit(eventType, data);
+    if (success) {
+      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
     }
+  }
 
-    public getState(): GameState {
-        return this.stateManager.getState();
-    }
+  public on(eventType: GameEventType, listener: EventListener): void {
+    this.eventEmitter.on(eventType, listener);
+  }
 
-    public getCurrentScene(): Scene | null {
-        return this.sceneManager.getCurrentScene();
-    }
+  public off(eventType: GameEventType, listener: EventListener): void {
+    this.eventEmitter.off(eventType, listener);
+  }
 
-    public getAvailableChoices(): Choice[] {
-        return this.sceneManager.getAvailableChoices(this.stateManager.getState());
-    }
+  public emit(eventType: GameEventType, data?: any): void {
+    this.eventEmitter.emit(eventType, data);
+  }
 
-    public registerPlugin(plugin: Plugin): void {
-        this.pluginManager.registerPlugin(plugin);
-    }
+  public getState(): GameState {
+    return this.stateManager.getState();
+  }
 
-    public unregisterPlugin(pluginName: string): void {
-        this.pluginManager.unregisterPlugin(pluginName);
-    }
+  public getCurrentScene(): Scene | null {
+    return this.sceneManager.getCurrentScene();
+  }
 
-    public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
-        return this.pluginManager.getPlugin<T>(pluginName);
-    }
+  public getAvailableChoices(): Choice[] {
+    return this.sceneManager.getAvailableChoices(this.stateManager.getState());
+  }
 
-    public registerEffectProcessor(
-        effectType: string,
-        processor: (effect: Effect, state: GameState) => void
-    ): void {
-        this.effectManager.registerEffectProcessor(effectType, processor);
-    }
+  public registerPlugin(plugin: Plugin): void {
+    this.pluginManager.registerPlugin(plugin);
+  }
 
-    public getContentLoader(): ContentLoader {
-        return this.contentLoader;
-    }
+  public unregisterPlugin(pluginName: string): void {
+    this.pluginManager.unregisterPlugin(pluginName);
+  }
 
-    public getEventEmitter(): EventEmitter {
-        return this.eventEmitter;
-    }
+  public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
+    return this.pluginManager.getPlugin<T>(pluginName);
+  }
 
-    public getStateManager(): StateManager {
-        return this.stateManager;
-    }
+  public registerEffectProcessor(
+    effectType: string,
+    processor: (effect: Effect, state: GameState) => void
+  ): void {
+    this.effectManager.registerEffectProcessor(effectType, processor);
+  }
 
-    public getSceneManager(): SceneManager {
-        return this.sceneManager;
-    }
+  public getContentLoader(): ContentLoader {
+    return this.contentLoader;
+  }
 
-    public getEffectManager(): EffectManager {
-        return this.effectManager;
-    }
+  public getEventEmitter(): EventEmitter {
+    return this.eventEmitter;
+  }
 
-    public getPluginManager(): PluginManager {
-        return this.pluginManager;
-    }
+  public getStateManager(): StateManager {
+    return this.stateManager;
+  }
+
+  public getSceneManager(): SceneManager {
+    return this.sceneManager;
+  }
+
+  public getEffectManager(): EffectManager {
+    return this.effectManager;
+  }
+
+  public getPluginManager(): PluginManager {
+    return this.pluginManager;
+  }
 }

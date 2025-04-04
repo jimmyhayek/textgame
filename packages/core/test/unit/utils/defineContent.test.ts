@@ -1,6 +1,6 @@
 // test/utils/defineContent.test.ts
-import { defineScenes } from '../../src/utils/defineContent';
-import { Scene } from '../../src/types';
+import { defineScenes } from '../../../src/utils/defineContent';
+import { Scene } from '../../../src/types';
 
 describe('defineContent', () => {
     test('should create scenes definition', () => {

@@ -120,7 +120,7 @@ src/
 ├── core/
 │   ├── GameEngine.ts       # Main engine class
 │   ├── SceneManager.ts     # Handles scene transitions
-│   ├── StateManager.ts     # Manages game state
+│   ├── StateManager.test.ts     # Manages game state
 │   ├── EventEmitter.ts     # Pub/sub event system
 │   ├── EffectManager.ts    # Processes game effects
 │   ├── PluginManager.ts    # Plugin registration and lifecycle

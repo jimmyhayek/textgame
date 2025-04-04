@@ -1,10 +1,10 @@
 // test/utils/createGameEngine.test.ts
-import { createGameEngine } from '../../src/utils/createGameEngine';
-import { GameEngine } from '../../src/core/GameEngine';
-import { defineScenes } from '../../src/utils/defineContent';
-import { Plugin } from '../../src/types';
+import { createGameEngine } from '../../../src/utils/createGameEngine';
+import { GameEngine } from '../../../src/core/GameEngine';
+import { defineScenes } from '../../../src/utils/defineContent';
+import { Plugin } from '../../../src/types';
 
-jest.mock('../../src/core/GameEngine');
+jest.mock('../../../src/core/GameEngine');
 
 describe('createGameEngine', () => {
     beforeEach(() => {

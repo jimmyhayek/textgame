@@ -1,6 +1,6 @@
 // test/core/GameEngine.test.ts
-import { GameEngine } from '../../src/core/GameEngine';
-import { Scene, Choice, Plugin, GameState } from '../../src/types';
+import { GameEngine } from '../../../src/core/GameEngine';
+import { Scene, Choice, Plugin, GameState } from '../../../src/types';
 
 describe('GameEngine', () => {
     let engine: GameEngine;
@@ -272,5 +272,146 @@ describe('GameEngine', () => {
 
         await engine.selectChoice('dynamicChoice');
         expect(engine.getCurrentScene()?.id).toBe('fallbackScene');
+    });
+
+    // test/core/GameEngine.test.ts - doplněk k existujícím testům
+
+    test('should handle errors in start method', async () => {
+        // Mock sceneManager.transitionToScene aby vrátil false (simuluje chybu)
+        const mockTransitionToScene = jest.fn().mockResolvedValue(false);
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+        // Vytvoření instance s mockovaným sceneManagerem
+        engine = new GameEngine();
+        const sceneManager = engine.getSceneManager();
+
+        // Nahrazení transitionToScene metodou, která vrací false
+        sceneManager.transitionToScene = mockTransitionToScene;
+
+        // Volání start, což by mělo aktivovat else větev
+        await engine.start('nonExistentScene');
+
+        // Kontrola, že chybová hláška byla vyvolána
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to start game at scene'));
+        expect(engine.isGameRunning()).toBe(false);
+
+        // Cleanup
+        consoleSpy.mockRestore();
+    });
+
+    test('should unregister event listener using off method', () => {
+        const engine = new GameEngine();
+        const mockListener = jest.fn();
+        const eventEmitterSpy = jest.spyOn(engine.getEventEmitter(), 'off');
+
+        // Nejprve registrujeme, pak odregistrujeme
+        engine.on('testEvent', mockListener);
+        engine.off('testEvent', mockListener);
+
+        // Kontrola, že off metoda byla volána
+        expect(eventEmitterSpy).toHaveBeenCalledWith('testEvent', mockListener);
+
+        // Cleanup
+        eventEmitterSpy.mockRestore();
+    });
+
+    test('should emit events using emit method', () => {
+        const engine = new GameEngine();
+        const eventEmitterSpy = jest.spyOn(engine.getEventEmitter(), 'emit');
+        const testData = { test: 'data' };
+
+        // Volání emit metody
+        engine.emit('testEvent', testData);
+
+        // Kontrola, že emit metoda byla volána
+        expect(eventEmitterSpy).toHaveBeenCalledWith('testEvent', testData);
+
+        // Cleanup
+        eventEmitterSpy.mockRestore();
+    });
+
+    test('should return managers through getter methods', () => {
+        const engine = new GameEngine();
+
+        // Test všech getter metod pro managery
+        const sceneManager = engine.getSceneManager();
+        const effectManager = engine.getEffectManager();
+        const pluginManager = engine.getPluginManager();
+
+        // Kontrola, že gettery fungují
+        expect(sceneManager).toBeDefined();
+        expect(effectManager).toBeDefined();
+        expect(pluginManager).toBeDefined();
+    });
+
+    test('should handle missing choice in selectChoice method', async () => {
+        // Příprava enginu s platnou scénou, ale bez volby
+        const engine = new GameEngine();
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+        // Registrace testovací scény
+        engine.getContentLoader().registerScenes({
+            'testScene': {
+                id: 'testScene',
+                title: 'Test Scene',
+                content: 'Content',
+                choices: [] // Žádné volby
+            }
+        });
+
+        // Spuštění hry
+        await engine.start('testScene');
+
+        // Volání selectChoice s neexistující volbou
+        await engine.selectChoice('nonExistentChoice');
+
+        // Kontrola, že chybová hláška byla vyvolána
+        expect(consoleSpy).toHaveBeenCalledWith(
+            expect.stringContaining('Choice with ID \'nonExistentChoice\' not found')
+        );
+
+        // Cleanup
+        consoleSpy.mockRestore();
+    });
+
+    test('should handle selectChoice when no scene is active', async () => {
+        const engine = new GameEngine();
+        // Nezavoláme start(), takže není aktivní scéna
+
+        // Kontrola, že selectChoice nefailne
+        await engine.selectChoice('anyChoice');
+
+        // Není potřeba kontrolovat výsledek, jen že metoda nezhavaruje
+    });
+
+    test('should handle choice with condition that evaluates to false', async () => {
+        const engine = new GameEngine();
+        const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+        // Scéna s podmíněnou volbou, která nikdy není platná
+        engine.getContentLoader().registerScenes({
+            'conditionScene': {
+                id: 'conditionScene',
+                title: 'Condition Scene',
+                content: 'Test',
+                choices: [{
+                    id: 'conditionalChoice',
+                    text: 'Conditional',
+                    nextScene: 'nowhere',
+                    condition: () => false
+                }]
+            }
+        });
+
+        await engine.start('conditionScene');
+        await engine.selectChoice('conditionalChoice');
+
+        // Kontrola, že byla zobrazena warning hláška
+        expect(consoleSpy).toHaveBeenCalledWith(
+            expect.stringContaining('Choice with ID \'conditionalChoice\' is not available')
+        );
+
+        // Cleanup
+        consoleSpy.mockRestore();
     });
 });

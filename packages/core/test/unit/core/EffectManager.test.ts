@@ -1,6 +1,6 @@
 // test/core/EffectManager.test.ts
-import { EffectManager } from '../../src/core/EffectManager';
-import { Effect, GameState } from '../../src/types';
+import { EffectManager } from '../../../src/core/EffectManager';
+import { Effect, GameState } from '../../../src/types';
 
 describe('EffectManager', () => {
     let effectManager: EffectManager;
@@ -114,5 +114,31 @@ describe('EffectManager', () => {
 
         expect(gameState.variables.var1).toBe(15);
         expect(gameState.variables.var2).toBe('test');
+    });
+
+    test('should use default value 1 for INCREMENT_VARIABLE when value not provided', () => {
+        gameState.variables.counter = 5;
+
+        const effect: Effect = {
+            type: 'INCREMENT_VARIABLE',
+            variable: 'counter'
+            // Záměrně vynecháme 'value'
+        };
+
+        effectManager.applyEffect(effect, gameState);
+        expect(gameState.variables.counter).toBe(6); // 5 + 1 (defaultní hodnota)
+    });
+
+    test('should use default value 1 for DECREMENT_VARIABLE when value not provided', () => {
+        gameState.variables.counter = 5;
+
+        const effect: Effect = {
+            type: 'DECREMENT_VARIABLE',
+            variable: 'counter'
+            // Záměrně vynecháme 'value'
+        };
+
+        effectManager.applyEffect(effect, gameState);
+        expect(gameState.variables.counter).toBe(4); // 5 - 1 (defaultní hodnota)
     });
 });

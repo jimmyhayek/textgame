@@ -1,6 +1,6 @@
 // test/core/StateManager.test.ts
-import { StateManager } from '../../src/core/StateManager';
-import { GameState } from '../../src/types';
+import { StateManager } from '../../../src/core/StateManager';
+import { GameState } from '../../../src/types';
 
 describe('StateManager', () => {
     let stateManager: StateManager;
@@ -155,5 +155,33 @@ describe('StateManager', () => {
         expect(resultState.variables.name).toBe('Player');
         expect(resultState.visitedScenes.has('scene1')).toBe(true);
         expect(resultState.visitedScenes.has('scene2')).toBe(true);
+    });
+
+    test('should handle empty array as fallback in serialize method', () => {
+        // Nastavit stav bez visitedScenes
+        stateManager.updateState(state => {
+            state.visitedScenes = undefined as any; // Záměrně vytvoříme nevalidní stav
+        });
+
+        const serialized = stateManager.serialize();
+        const parsed = JSON.parse(serialized);
+
+        // Zkontrolujeme, že serialize použil prázdné pole jako fallback
+        expect(parsed.visitedScenes).toEqual([]);
+    });
+
+    test('should handle empty array as fallback in deserialize method', () => {
+        // Připravit serializovaný stav s chybějící visitedScenes
+        const invalidState = JSON.stringify({
+            variables: { test: 'value' }
+            // chybí visitedScenes
+        });
+
+        stateManager.deserialize(invalidState);
+        const state = stateManager.getState();
+
+        // Zkontrolujeme, že deserialize vytvořil nový Set z prázdného pole
+        expect(state.visitedScenes instanceof Set).toBe(true);
+        expect(state.visitedScenes.size).toBe(0);
     });
 });

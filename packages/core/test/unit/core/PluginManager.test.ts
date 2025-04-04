@@ -1,6 +1,6 @@
 // test/core/PluginManager.test.ts
-import { PluginManager } from '../../src/core/PluginManager';
-import { Plugin } from '../../src/types';
+import { PluginManager } from '../../../src/core/PluginManager';
+import { Plugin } from '../../../src/types';
 
 describe('PluginManager', () => {
     let pluginManager: PluginManager;

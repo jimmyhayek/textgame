@@ -1,10 +1,10 @@
 // test/core/SceneManager.test.ts
-import { SceneManager } from '../../src/core/SceneManager';
-import { ContentLoader } from '../../src/core/ContentLoader';
-import { Scene, Choice, GameState } from '../../src/types';
+import { SceneManager } from '../../../src/core/SceneManager';
+import { ContentLoader } from '../../../src/core/ContentLoader';
+import { Scene, Choice, GameState } from '../../../src/types';
 
 // Mock ContentLoader
-jest.mock('../../src/core/ContentLoader');
+jest.mock('../../../src/core/ContentLoader');
 
 describe('SceneManager', () => {
     let sceneManager: SceneManager;

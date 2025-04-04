@@ -1,5 +1,5 @@
 // test/core/EventEmitter.test.ts
-import { EventEmitter } from '../../src/core/EventEmitter';
+import { EventEmitter } from '../../../src/core/EventEmitter';
 
 describe('EventEmitter', () => {
     let emitter: EventEmitter;

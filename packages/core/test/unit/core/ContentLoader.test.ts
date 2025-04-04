@@ -1,5 +1,5 @@
-import { ContentLoader } from '../../src/core/ContentLoader';
-import { Scene, SceneId } from '../../src/types';
+import { ContentLoader } from '../../../src/core/ContentLoader';
+import { Scene, SceneId } from '../../../src/types';
 
 describe('ContentLoader', () => {
     let contentLoader: ContentLoader;

@@ -1,4 +1,4 @@
-import { GameEngine } from '../core/GameEngine';
+import { GameEngine } from '../core';
 import { Plugin, ScenesDefinition, GameState } from '../types';
 
 interface GameEngineOptions {

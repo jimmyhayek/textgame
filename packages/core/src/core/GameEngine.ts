@@ -63,9 +63,9 @@ export class GameEngine {
    */
   public async start(initialSceneId: SceneId): Promise<void> {
     const success = await this.sceneManager.transitionToScene(
-        initialSceneId,
-        this.stateManager.getState(),
-        this
+      initialSceneId,
+      this.stateManager.getState(),
+      this
     );
 
     if (success) {
@@ -125,9 +125,9 @@ export class GameEngine {
     }
 
     const success = await this.sceneManager.transitionToScene(
-        nextSceneId,
-        this.stateManager.getState(),
-        this
+      nextSceneId,
+      this.stateManager.getState(),
+      this
     );
 
     if (success) {
@@ -234,8 +234,8 @@ export class GameEngine {
    * @param processor - Function to process effects of the specified type
    */
   public registerEffectProcessor(
-      effectType: string,
-      processor: (effect: Effect, state: GameState) => void
+    effectType: string,
+    processor: (effect: Effect, state: GameState) => void
   ): void {
     this.effectManager.registerEffectProcessor(effectType, processor);
   }

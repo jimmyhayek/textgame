@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">90% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/10</span>
+                <span class='fraction'>9/10</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">40% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>2/5</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">85.71% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/7</span>
+                <span class='fraction'>6/7</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">90% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/10</span>
+                <span class='fraction'>9/10</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -107,33 +107,30 @@
 <a name='L42'></a><a href='#L42'>42</a>
 <a name='L43'></a><a href='#L43'>43</a>
 <a name='L44'></a><a href='#L44'>44</a>
-<a name='L45'></a><a href='#L45'>45</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">37x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -141,68 +138,74 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { GameState } from '../types';
 &nbsp;
-<span class="cstat-no" title="statement not covered" >export class S</span>tateManager {
-    private state: GameState;
+export class StateManager {
+  private state: GameState;
 &nbsp;
-<span class="fstat-no" title="function not covered" >    constructor(i</span>nitialState: Partial&lt;GameState&gt; = <span class="branch-0 cbranch-no" title="branch not covered" >{})</span> {
-<span class="cstat-no" title="statement not covered" >        this.state = this.createInitialState(initialState);</span>
-    }
+  constructor(initialState: Partial&lt;GameState&gt; = <span class="branch-0 cbranch-no" title="branch not covered" >{})</span> {
+    this.state = this.createInitialState(initialState);
+  }
 &nbsp;
-    private <span class="fstat-no" title="function not covered" >createInitialState(</span>initialState: Partial&lt;GameState&gt;): GameState {
-<span class="cstat-no" title="statement not covered" >        return {</span>
-            visitedScenes: new Set&lt;string&gt;(),
-            variables: {},
-            ...initialState
-        };
-    }
+  private createInitialState(initialState: Partial&lt;GameState&gt;): GameState {
+    return {
+      visitedScenes: new Set&lt;string&gt;(),
+      variables: {},
+      ...initialState,
+    };
+  }
 &nbsp;
-    public <span class="fstat-no" title="function not covered" >getState(</span>): GameState {
-<span class="cstat-no" title="statement not covered" >        return this.state;</span>
-    }
+  public getState(): GameState {
+    return this.state;
+  }
 &nbsp;
-    public <span class="fstat-no" title="function not covered" >updateState(</span>updater: (state: GameState) =&gt; void): void {
-<span class="cstat-no" title="statement not covered" >        updater(this.state);</span>
-    }
+  public updateState(updater: (state: GameState) =&gt; void): void {
+    updater(this.state);
+  }
 &nbsp;
-    public <span class="fstat-no" title="function not covered" >setState(</span>newState: GameState): void {
-<span class="cstat-no" title="statement not covered" >        this.state = newState;</span>
-    }
+  public <span class="fstat-no" title="function not covered" >setState(</span>newState: GameState): void {
+<span class="cstat-no" title="statement not covered" >    this.state = newState;</span>
+  }
 &nbsp;
-    public <span class="fstat-no" title="function not covered" >serialize(</span>): string {
-        const serializableState = <span class="cstat-no" title="statement not covered" >{</span>
-            ...this.state,
-            visitedScenes: Array.from(this.state.visitedScenes || [])
-        };
-<span class="cstat-no" title="statement not covered" >        return JSON.stringify(serializableState);</span>
-    }
+  public serialize(): string {
+    const serializableState = {
+      ...this.state,
+      visitedScenes: Array.from(this.state.visitedScenes || <span class="branch-1 cbranch-no" title="branch not covered" >[])</span>,
+    };
+    return JSON.stringify(serializableState);
+  }
 &nbsp;
-    public <span class="fstat-no" title="function not covered" >deserialize(</span>serializedState: string): void {
-        const parsedState = <span class="cstat-no" title="statement not covered" >JSON.parse(serializedState);</span>
-<span class="cstat-no" title="statement not covered" >        this.state = {</span>
-            ...parsedState,
-            visitedScenes: new Set(parsedState.visitedScenes || [])
-        };
-    }
-}</pre></td></tr></table></pre>
+  public deserialize(serializedState: string): void {
+    const parsedState = JSON.parse(serializedState);
+    this.state = {
+      ...parsedState,
+      visitedScenes: new Set(parsedState.visitedScenes || <span class="branch-1 cbranch-no" title="branch not covered" >[])</span>,
+    };
+  }
+}
+&nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
             </div><!-- /wrapper -->
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-03-30T21:01:08.026Z
+                at 2025-04-04T01:14:13.177Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

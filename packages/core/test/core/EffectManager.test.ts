@@ -1,5 +1,6 @@
-import { EffectManager } from '../../../src/core/EffectManager';
-import { Effect, GameState } from '../../../src/types';
+// test/core/EffectManager.test.ts
+import { EffectManager } from '../../src/core/EffectManager';
+import { Effect, GameState } from '../../src/types';
 
 describe('EffectManager', () => {
     let effectManager: EffectManager;
@@ -21,12 +22,10 @@ describe('EffectManager', () => {
         };
 
         effectManager.applyEffect(effect, gameState);
-
         expect(gameState.variables.testVar).toBe('testValue');
     });
 
     test('should increment variable with INCREMENT_VARIABLE effect', () => {
-        // First set the variable to a base value
         gameState.variables.counter = 5;
 
         const effect: Effect = {
@@ -36,7 +35,6 @@ describe('EffectManager', () => {
         };
 
         effectManager.applyEffect(effect, gameState);
-
         expect(gameState.variables.counter).toBe(8);
     });
 
@@ -48,8 +46,31 @@ describe('EffectManager', () => {
         };
 
         effectManager.applyEffect(effect, gameState);
-
         expect(gameState.variables.newCounter).toBe(5);
+    });
+
+    test('should decrement variable with DECREMENT_VARIABLE effect', () => {
+        gameState.variables.counter = 10;
+
+        const effect: Effect = {
+            type: 'DECREMENT_VARIABLE',
+            variable: 'counter',
+            value: 3
+        };
+
+        effectManager.applyEffect(effect, gameState);
+        expect(gameState.variables.counter).toBe(7);
+    });
+
+    test('should initialize variable to 0 when decrementing undefined variable', () => {
+        const effect: Effect = {
+            type: 'DECREMENT_VARIABLE',
+            variable: 'newCounter',
+            value: 5
+        };
+
+        effectManager.applyEffect(effect, gameState);
+        expect(gameState.variables.newCounter).toBe(-5);
     });
 
     test('should register and apply custom effect processor', () => {
@@ -67,6 +88,19 @@ describe('EffectManager', () => {
 
         expect(gameState.variables.customProcessed).toBe(true);
         expect(gameState.variables.customValue).toBe('customValue');
+    });
+
+    test('should warn when applying effect with unknown type', () => {
+        const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+        const unknownEffect: Effect = {
+            type: 'UNKNOWN_EFFECT',
+            someParam: 'value'
+        };
+
+        effectManager.applyEffect(unknownEffect, gameState);
+
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('UNKNOWN_EFFECT'));
+        consoleSpy.mockRestore();
     });
 
     test('should apply multiple effects in sequence', () => {

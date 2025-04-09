@@ -1,5 +1,5 @@
 {
-  "name": "@textgame/core",
+  "name": "@pabitel/core",
   "version": "0.1.0",
   "description": "A minimalist framework for building text-based games and interactive narratives",
   "license": "MIT",
@@ -61,5 +61,8 @@
     "game-engine",
     "narrative",
     "text-adventure"
-  ]
+  ],
+  "dependencies": {
+    "immer": "^10.1.1"
+  }
 }

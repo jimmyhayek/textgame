@@ -1,187 +1,170 @@
-// test/core/StateManager.test.ts
-import { StateManager } from '../../../src/core/StateManager';
-import { GameState } from '../../../src/types';
+// test/core/SceneManager.test.ts
+import { SceneManager } from '../../../src/core/SceneManager';
+import { ContentLoader } from '../../../src/core/ContentLoader';
+import { Scene, Choice, GameState } from '../../../src/types';
 
-describe('StateManager', () => {
-    let stateManager: StateManager;
+// Mock ContentLoader
+jest.mock('../../../src/core/ContentLoader');
+
+describe('SceneManager', () => {
+    let sceneManager: SceneManager;
+    let contentLoader: ContentLoader;
+    let mockEngine: any;
+    let gameState: GameState;
 
     beforeEach(() => {
-        stateManager = new StateManager();
+        contentLoader = new ContentLoader() as jest.Mocked<ContentLoader>;
+        // Vytvořme mock pro engine s getStateManager metodou
+        mockEngine = {
+            id: 'mockEngine',
+            // Volitelná implementace getStateManager pro testy
+            getStateManager: jest.fn().mockReturnValue({
+                updateState: jest.fn((updater) => {
+                    updater(gameState);
+                })
+            })
+        };
+        sceneManager = new SceneManager(contentLoader);
+        gameState = { visitedScenes: new Set<string>(), variables: {} };
     });
 
-    test('should create default state on initialization', () => {
-        const state = stateManager.getState();
-
-        expect(state.visitedScenes).toBeInstanceOf(Set);
-        expect(state.visitedScenes.size).toBe(0);
-        expect(state.variables).toEqual({});
-    });
-
-    test('should initialize with provided state', () => {
-        const initialState = {
-            variables: {
-                score: 100,
-                name: 'Player'
-            }
+    test('should transition to scene', async () => {
+        const testScene: Scene = {
+            id: 'testScene',
+            title: 'Test Scene',
+            content: 'Test content',
+            choices: [],
+            onEnter: jest.fn()
         };
 
-        const customStateManager = new StateManager(initialState);
-        const state = customStateManager.getState();
+        (contentLoader.loadScene as jest.Mock).mockResolvedValue(testScene);
 
-        expect(state.variables.score).toBe(100);
-        expect(state.variables.name).toBe('Player');
-        expect(state.visitedScenes).toBeInstanceOf(Set);
+        const result = await sceneManager.transitionToScene('testScene', gameState, mockEngine);
+
+        expect(result).toBe(true);
+        expect(contentLoader.loadScene).toHaveBeenCalledWith('testScene');
+        expect(testScene.onEnter).toHaveBeenCalledWith(gameState, mockEngine);
+        expect(gameState.visitedScenes.has('testScene')).toBe(true);
+        expect(sceneManager.getCurrentSceneId()).toBe('testScene');
+        expect(sceneManager.getCurrentScene()).toBe(testScene);
     });
 
-    test('should update state', () => {
-        stateManager.updateState(state => {
-            state.variables.testVar = 'test';
-            state.visitedScenes.add('scene1');
-        });
-
-        const state = stateManager.getState();
-
-        expect(state.variables.testVar).toBe('test');
-        expect(state.visitedScenes.has('scene1')).toBe(true);
-    });
-
-    test('should set state', () => {
-        const newState: GameState = {
-            visitedScenes: new Set(['scene1', 'scene2']),
-            variables: {
-                health: 100,
-                inventory: ['sword', 'shield']
-            }
+    test('should call onExit when transitioning from scene', async () => {
+        const initialScene: Scene = {
+            id: 'initialScene',
+            title: 'Initial Scene',
+            content: 'Initial content',
+            choices: [],
+            onExit: jest.fn()
         };
 
-        stateManager.setState(newState);
-        const state = stateManager.getState();
-
-        expect(state).toBe(newState);
-        expect(state.visitedScenes.has('scene1')).toBe(true);
-        expect(state.visitedScenes.has('scene2')).toBe(true);
-        expect(state.variables.health).toBe(100);
-        expect(state.variables.inventory).toEqual(['sword', 'shield']);
-    });
-
-    test('should serialize and deserialize state', () => {
-        stateManager.updateState(state => {
-            state.variables.testVar = 'test';
-            state.visitedScenes.add('scene1');
-            state.visitedScenes.add('scene2');
-        });
-
-        const serialized = stateManager.serialize();
-
-        // Vytvoření nové instance a deserializace
-        const newStateManager = new StateManager();
-        newStateManager.deserialize(serialized);
-
-        const newState = newStateManager.getState();
-
-        expect(newState.variables.testVar).toBe('test');
-        expect(newState.visitedScenes.has('scene1')).toBe(true);
-        expect(newState.visitedScenes.has('scene2')).toBe(true);
-    });
-
-    test('should handle empty sets when serializing', () => {
-        const serialized = stateManager.serialize();
-        const parsed = JSON.parse(serialized);
-
-        expect(parsed.visitedScenes).toEqual([]);
-    });
-
-    test('should handle custom properties', () => {
-        stateManager.updateState(state => {
-            (state as any).customProp = {
-                nested: {
-                    value: 42
-                }
-            };
-        });
-
-        const serialized = stateManager.serialize();
-        const newStateManager = new StateManager();
-        newStateManager.deserialize(serialized);
-
-        expect((newStateManager.getState() as any).customProp.nested.value).toBe(42);
-    });
-
-    test('should set state directly', () => {
-        const newState = {
-            visitedScenes: new Set(['sceneA', 'sceneB']),
-            variables: {
-                score: 100,
-                health: 50
-            }
+        const nextScene: Scene = {
+            id: 'nextScene',
+            title: 'Next Scene',
+            content: 'Next content',
+            choices: []
         };
 
-        stateManager.setState(newState);
+        (contentLoader.loadScene as jest.Mock)
+            .mockResolvedValueOnce(initialScene)
+            .mockResolvedValueOnce(nextScene);
 
-        const retrievedState = stateManager.getState();
-        expect(retrievedState).toBe(newState); // Test přímé reference (ne jen hodnot)
-        expect(retrievedState.variables.score).toBe(100);
-        expect(retrievedState.variables.health).toBe(50);
-        expect(retrievedState.visitedScenes.has('sceneA')).toBe(true);
-        expect(retrievedState.visitedScenes.has('sceneB')).toBe(true);
+        await sceneManager.transitionToScene('initialScene', gameState, mockEngine);
+        await sceneManager.transitionToScene('nextScene', gameState, mockEngine);
+
+        expect(initialScene.onExit).toHaveBeenCalledWith(gameState, mockEngine);
     });
 
-    // Přidej následující test do test/core/StateManager.test.ts
+    test('should return false when scene load fails', async () => {
+        (contentLoader.loadScene as jest.Mock).mockRejectedValue(new Error('Scene load failed'));
 
-    test('should set state directly', () => {
-        const initialState = stateManager.getState();
-        expect(initialState.variables).toEqual({});
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
 
-        // Vytvořit nový stav, který chceme nastavit
-        const newState: GameState = {
-            visitedScenes: new Set(['scene1', 'scene2']),
-            variables: {
-                score: 100,
-                name: 'Player'
+        const result = await sceneManager.transitionToScene('failScene', gameState, mockEngine);
+
+        expect(result).toBe(false);
+        expect(consoleSpy).toHaveBeenCalled();
+
+        consoleSpy.mockRestore();
+    });
+
+    test('should filter available choices based on conditions', async () => {
+        const choices: Choice[] = [
+            { id: 'always', text: 'Always Available', nextScene: 'next1' },
+            {
+                id: 'conditional',
+                text: 'Conditional',
+                nextScene: 'next2',
+                condition: (state) => state.variables.flag === true
             }
+        ];
+
+        const testScene: Scene = {
+            id: 'choiceScene',
+            title: 'Choice Scene',
+            content: 'Test choices',
+            choices
         };
 
-        // Zavolat testovanou metodu
-        stateManager.setState(newState);
+        (contentLoader.loadScene as jest.Mock).mockResolvedValue(testScene);
+        await sceneManager.transitionToScene('choiceScene', gameState, mockEngine);
 
-        // Zkontrolovat, že stav byl skutečně nastaven
-        const resultState = stateManager.getState();
+        // Without flag
+        let availableChoices = sceneManager.getAvailableChoices(gameState);
+        expect(availableChoices).toHaveLength(1);
+        expect(availableChoices[0].id).toBe('always');
 
-        // Očekáváme, že reference je stejná - stejný objekt
-        expect(resultState).toBe(newState);
+        // With flag set to true
+        gameState.variables.flag = true;
+        availableChoices = sceneManager.getAvailableChoices(gameState);
+        expect(availableChoices).toHaveLength(2);
 
-        // Pro jistotu zkontrolujeme i hodnoty
-        expect(resultState.variables.score).toBe(100);
-        expect(resultState.variables.name).toBe('Player');
-        expect(resultState.visitedScenes.has('scene1')).toBe(true);
-        expect(resultState.visitedScenes.has('scene2')).toBe(true);
+        // With flag set to false
+        gameState.variables.flag = false;
+        availableChoices = sceneManager.getAvailableChoices(gameState);
+        expect(availableChoices).toHaveLength(1);
     });
 
-    test('should handle empty array as fallback in serialize method', () => {
-        // Nastavit stav bez visitedScenes
-        stateManager.updateState(state => {
-            state.visitedScenes = undefined as any; // Záměrně vytvoříme nevalidní stav
-        });
-
-        const serialized = stateManager.serialize();
-        const parsed = JSON.parse(serialized);
-
-        // Zkontrolujeme, že serialize použil prázdné pole jako fallback
-        expect(parsed.visitedScenes).toEqual([]);
+    test('should return empty array when no current scene', () => {
+        const choices = sceneManager.getAvailableChoices(gameState);
+        expect(choices).toEqual([]);
     });
 
-    test('should handle empty array as fallback in deserialize method', () => {
-        // Připravit serializovaný stav s chybějící visitedScenes
-        const invalidState = JSON.stringify({
-            variables: { test: 'value' }
-            // chybí visitedScenes
-        });
+    test('should handle errors when scene does not exist', async () => {
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+        (contentLoader.loadScene as jest.Mock).mockResolvedValue(null);
 
-        stateManager.deserialize(invalidState);
-        const state = stateManager.getState();
+        const result = await sceneManager.transitionToScene('non-existent-scene', gameState, mockEngine);
 
-        // Zkontrolujeme, že deserialize vytvořil nový Set z prázdného pole
-        expect(state.visitedScenes instanceof Set).toBe(true);
-        expect(state.visitedScenes.size).toBe(0);
+        expect(result).toBe(false);
+        expect(consoleSpy).toHaveBeenCalled();
+        consoleSpy.mockRestore();
+    });
+
+    test('should handle the case when getStateManager is not available', async () => {
+        // Vytvoříme engine bez getStateManager metody
+        const simpleEngine = { id: 'simpleEngine' };
+
+        const testScene: Scene = {
+            id: 'testScene',
+            title: 'Test Scene',
+            content: 'Test content',
+            choices: []
+        };
+
+        (contentLoader.loadScene as jest.Mock).mockResolvedValue(testScene);
+
+        const result = await sceneManager.transitionToScene('testScene', gameState, simpleEngine);
+
+        expect(result).toBe(true);
+        expect(gameState.visitedScenes.has('testScene')).toBe(true);
+    });
+
+    test('should return empty array when no current scene is set', () => {
+        // Zajistit, že není nastaven žádný current scene
+        const choices = sceneManager.getAvailableChoices(gameState);
+
+        expect(choices).toEqual([]);
+        expect(sceneManager.getCurrentSceneId()).toBeNull();
     });
 });

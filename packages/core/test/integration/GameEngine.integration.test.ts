@@ -63,6 +63,10 @@ describe('GameEngine Integration', () => {
     };
 
     beforeEach(() => {
+        // Resetujeme všechny mock funkce
+        jest.clearAllMocks();
+
+        // Vytvoříme novou instanci enginu pro každý test
         engine = new GameEngine();
         engine.getContentLoader().registerScenes(scenes);
     });

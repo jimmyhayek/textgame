@@ -28,6 +28,7 @@ export interface GameEngineOptions {
  *
  * The engine manages game state, scenes, transitions between scenes,
  * effect processing, and provides a plugin architecture for extending functionality.
+ * It uses Immer under the hood for immutable state management.
  */
 export class GameEngine {
   private readonly eventEmitter: EventEmitter;
@@ -63,9 +64,9 @@ export class GameEngine {
    */
   public async start(initialSceneId: SceneId): Promise<void> {
     const success = await this.sceneManager.transitionToScene(
-      initialSceneId,
-      this.stateManager.getState(),
-      this
+        initialSceneId,
+        this.stateManager.getState(),
+        this
     );
 
     if (success) {
@@ -102,21 +103,24 @@ export class GameEngine {
       return;
     }
 
-    if (choice.condition && !choice.condition(this.stateManager.getState())) {
+    // Získat aktuální stav
+    const currentState = this.stateManager.getState();
+
+    if (choice.condition && !choice.condition(currentState)) {
       console.warn(`Choice with ID '${choiceId}' is not available.`);
       return;
     }
 
     this.eventEmitter.emit('choiceSelected', { choice });
 
+    // Aplikovat efekty, pokud existují
     if (choice.effects && choice.effects.length > 0) {
-      this.stateManager.updateState(state => {
-        this.effectManager.applyEffects(choice.effects!, state);
-      });
-
+      const newState = this.effectManager.applyEffects(choice.effects, currentState);
+      this.stateManager.setState(newState);
       this.eventEmitter.emit('stateChanged', this.stateManager.getState());
     }
 
+    // Získat ID další scény
     let nextSceneId: string;
     if (typeof choice.nextScene === 'function') {
       nextSceneId = choice.nextScene(this.stateManager.getState());
@@ -124,10 +128,11 @@ export class GameEngine {
       nextSceneId = choice.nextScene;
     }
 
+    // Přejít na další scénu
     const success = await this.sceneManager.transitionToScene(
-      nextSceneId,
-      this.stateManager.getState(),
-      this
+        nextSceneId,
+        this.stateManager.getState(),
+        this
     );
 
     if (success) {
@@ -234,8 +239,8 @@ export class GameEngine {
    * @param processor - Function to process effects of the specified type
    */
   public registerEffectProcessor(
-    effectType: string,
-    processor: (effect: Effect, state: GameState) => void
+      effectType: string,
+      processor: (effect: Effect, state: GameState) => void
   ): void {
     this.effectManager.registerEffectProcessor(effectType, processor);
   }

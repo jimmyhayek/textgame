@@ -2,13 +2,12 @@ import {
   GameState,
   Choice,
   Scene,
-  SceneId,
   Effect,
   Plugin,
   GameEventType,
   EventListener,
   ContentDefinition,
-  ContentRegistry
+  ContentRegistry, SceneKey
 } from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
@@ -18,21 +17,14 @@ import { PluginManager } from './PluginManager';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';
 import { LoaderRegistry } from '../loaders/LoaderRegistry';
 
-/**
- * Configuration options for the game engine initialization
- */
 export interface GameEngineOptions {
-  /** Initial game state that will be merged with the default empty state */
+  /** Loader scén pro načítání herního obsahu */
+  sceneLoader: GenericContentLoader<Scene>;
+
+  /** Počáteční stav hry, který bude sloučen s výchozím prázdným stavem */
   initialState?: Partial<GameState>;
 
-
-  /** Content loaders to be used by the engine */
-  loaders?: {
-    /** Additional loaders by type */
-    [key: string]: GenericContentLoader<any>;
-  };
-
-  /** Plugins to be registered with the engine */
+  /** Pluginy, které budou registrovány s enginem */
   plugins?: Plugin[];
 }
 
@@ -65,17 +57,10 @@ export class GameEngine {
   /** Flag indicating if the game is running */
   private isRunning: boolean = false;
 
-  /**
-   * Creates a new game engine instance
-   *
-   * @param options Configuration options for the engine
-   */
-  constructor(options: GameEngineOptions = {}) {
+  constructor(options: GameEngineOptions) {
     const {
+      sceneLoader,
       initialState = {},
-      loaders = {
-        scenes: new GenericContentLoader<Scene>()
-      },
       plugins = []
     } = options;
 
@@ -83,40 +68,32 @@ export class GameEngine {
     this.stateManager = new StateManager(initialState);
     this.loaderRegistry = new LoaderRegistry();
 
-    // Register all provided loaders
-    Object.entries(loaders).forEach(([type, loader]) => {
-      this.loaderRegistry.registerLoader(type, loader);
-    });
+    // Registrace scén loaderu
+    this.loaderRegistry.registerLoader('scenes', sceneLoader);
 
-    // Initialize scene manager with the scene loader
-    this.sceneManager = new SceneManager(loaders.scenes);
+    // Inicializace scene manager s loaderem scén
+    this.sceneManager = new SceneManager(sceneLoader);
     this.effectManager = new EffectManager();
     this.pluginManager = new PluginManager(this);
 
-    // Initialize plugins
+    // Inicializace pluginů
     plugins.forEach(plugin => this.registerPlugin(plugin));
   }
 
-  /**
-   * Starts the game beginning with the specified scene
-   *
-   * @param initialSceneId ID of the scene to start the game with
-   * @returns Promise that resolves after successful transition to the initial scene
-   * @throws Error if the scene doesn't exist or can't be transitioned to
-   */
-  public async start(initialSceneId: SceneId): Promise<void> {
+
+  public async start(initialSceneKey: SceneKey): Promise<void> {
     const success = await this.sceneManager.transitionToScene(
-        initialSceneId,
+        initialSceneKey,
         this.stateManager.getState(),
         this
     );
 
     if (success) {
       this.isRunning = true;
-      this.eventEmitter.emit('gameStarted', { sceneId: initialSceneId });
+      this.eventEmitter.emit('gameStarted', { sceneKey: initialSceneKey });
       this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
     } else {
-      console.error(`Failed to start game at scene '${initialSceneId}'`);
+      console.error(`Failed to start game at scene '${initialSceneKey}'`);
     }
   }
 
@@ -129,56 +106,50 @@ export class GameEngine {
     return this.isRunning;
   }
 
-  /**
-   * Selects a choice from the current scene and transitions to the next scene
-   *
-   * @param choiceId ID of the choice to select
-   * @returns Promise that resolves after completing the transition to the new scene
-   */
-  public async selectChoice(choiceId: string): Promise<void> {
+  public async selectChoice(choiceIndex: number): Promise<void> {
     const currentScene = this.sceneManager.getCurrentScene();
     if (!currentScene) return;
 
-    const choice = currentScene.choices.find(c => c.id === choiceId);
+    const choice = currentScene.choices[choiceIndex];
     if (!choice) {
-      console.error(`Choice with ID '${choiceId}' not found in current scene.`);
+      console.error(`Choice with index ${choiceIndex} not found in current scene.`);
       return;
     }
 
-    // Get current state
+    // Kontrola podmínky volby
     const currentState = this.stateManager.getState();
-
     if (choice.condition && !choice.condition(currentState)) {
-      console.warn(`Choice with ID '${choiceId}' is not available.`);
+      console.warn(`Choice with index ${choiceIndex} is not available.`);
       return;
     }
 
     this.eventEmitter.emit('choiceSelected', { choice });
 
-    // Apply effects if they exist
+    // Aplikace efektů volby
     if (choice.effects && choice.effects.length > 0) {
       const newState = this.effectManager.applyEffects(choice.effects, currentState);
       this.stateManager.setState(newState);
       this.eventEmitter.emit('stateChanged', this.stateManager.getState());
     }
 
-    // Get next scene ID
-    let nextSceneId: string;
-    if (typeof choice.nextScene === 'function') {
-      nextSceneId = choice.nextScene(this.stateManager.getState());
-    } else {
-      nextSceneId = choice.nextScene;
-    }
+    // Přechod na další scénu, pokud je specifikována
+    if (choice.scene) {
+      let nextSceneKey: string;
+      if (typeof choice.scene === 'function') {
+        nextSceneKey = choice.scene(this.stateManager.getState());
+      } else {
+        nextSceneKey = choice.scene;
+      }
 
-    // Transition to next scene
-    const success = await this.sceneManager.transitionToScene(
-        nextSceneId,
-        this.stateManager.getState(),
-        this
-    );
+      const success = await this.sceneManager.transitionToScene(
+          nextSceneKey,
+          this.stateManager.getState(),
+          this
+      );
 
-    if (success) {
-      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
+      if (success) {
+        this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
+      }
     }
   }
 
@@ -374,5 +345,9 @@ export class GameEngine {
    */
   public getLoaderRegistry(): LoaderRegistry {
     return this.loaderRegistry;
+  }
+
+  public getCurrentSceneKey(): SceneKey | null {
+    return this.sceneManager.getCurrentSceneKey();
   }
 }

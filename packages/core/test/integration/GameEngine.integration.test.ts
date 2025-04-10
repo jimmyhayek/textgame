@@ -1,146 +1,179 @@
 import { GameEngine } from '../../src/core/GameEngine';
 import { Scene, Choice, GameState } from '../../src/types';
-import { GenericContentLoader } from '../../src/loaders/GenericContentLoader';
+import { defineScene, defineScenes, createSceneLoader } from '../../src/utils/defineContent';
 
-// Skutečná instance, ne mock
 describe('GameEngine Integration', () => {
     let engine: GameEngine;
-    let sceneLoader: GenericContentLoader<Scene>;
 
-    // Definujeme testovací scény
-    const scenes = {
-        'start': {
-            id: 'start',
-            title: 'Start Scene',
-            content: 'You are at the beginning of your journey.',
-            choices: [
-                {
-                    id: 'goToForest',
-                    text: 'Go to the forest',
-                    nextScene: 'forest'
-                },
-                {
-                    id: 'goToVillage',
-                    text: 'Go to the village',
-                    nextScene: 'village',
-                    // Zde přidáváme typovou anotaci pro parametr state
-                    condition: (state: GameState) => state.variables.hasMap === true
-                }
-            ]
-        },
-        'forest': {
-            id: 'forest',
-            title: 'Forest',
-            content: 'You are in a dense forest.',
-            choices: [
-                {
-                    id: 'findMap',
-                    text: 'Search for a map',
-                    nextScene: 'forest',
-                    effects: [
-                        { type: 'SET_VARIABLE', variable: 'hasMap', value: true }
-                    ]
-                },
-                {
-                    id: 'goBackStart',
-                    text: 'Go back to start',
-                    nextScene: 'start'
-                }
-            ],
-            onEnter: jest.fn()
-        },
-        'village': {
-            id: 'village',
-            title: 'Village',
-            content: 'You reached a small village.',
-            choices: [
-                {
-                    id: 'goBackStart',
-                    text: 'Go back to start',
-                    nextScene: 'start'
-                }
-            ],
-            onEnter: jest.fn()
-        }
-    };
+    // Definujeme testovací scény pomocí nového API
+    const forestIntroScene = defineScene({
+        title: 'Vstup do lesa',
+        content: 'Stojíš na okraji hlubokého lesa.',
+        choices: [
+            {
+                content: 'Prozkoumat les',
+                scene: 'forest/clearing'
+            },
+            {
+                content: 'Jít do vesnice',
+                scene: 'village/square',
+                // Podmínka pro dostupnost volby
+                condition: (state: GameState) => state.variables.hasMap === true
+            }
+        ]
+    });
+
+    const forestClearingScene = defineScene({
+        title: 'Lesní mýtina',
+        content: 'Nacházíš se na malé mýtině uprostřed lesa.',
+        choices: [
+            {
+                content: 'Prohledat mýtinu',
+                // Bez scene property - pouze efekt
+                effects: [
+                    { type: 'SET_VARIABLE', variable: 'hasMap', value: true }
+                ]
+            },
+            {
+                content: 'Vrátit se na okraj lesa',
+                scene: 'forest/intro'
+            }
+        ],
+        onEnter: jest.fn()
+    });
+
+    const villageSquareScene = defineScene({
+        title: 'Vesnické náměstí',
+        content: 'Stojíš na malém náměstí obklopeném dřevěnými domy.',
+        choices: [
+            {
+                content: 'Vrátit se do lesa',
+                scene: 'forest/intro'
+            }
+        ],
+        onEnter: jest.fn()
+    });
 
     beforeEach(() => {
         // Resetujeme všechny mock funkce
         jest.clearAllMocks();
 
-        // Vytvoříme loader pro scény
-        sceneLoader = new GenericContentLoader<Scene>();
+        // Definice scén pomocí nových helper funkcí
+        const scenes = defineScenes({
+            'forest/intro': forestIntroScene,
+            'forest/clearing': forestClearingScene,
+            'village/square': villageSquareScene
+        });
 
-        // Registrujeme scény do loaderu
-        sceneLoader.registerContent(scenes);
+        // Vytvoření loaderu pomocí nového helper
+        const sceneLoader = createSceneLoader(scenes);
 
-        // Vytvoříme novou instanci enginu s loaderem
+        // Vytvoření nové instance enginu s loaderem
         engine = new GameEngine({
-            loaders: {
-                scenes: sceneLoader
+            sceneLoader,
+            initialState: {
+                visitedScenes: new Set<string>(),
+                variables: {
+                    hasMap: false
+                }
             }
         });
     });
 
-    test('should handle game flow correctly', async () => {
+    test('should handle game flow with new API', async () => {
         // Sledování událostí
         const eventSpy = jest.fn();
         engine.on('sceneChanged', eventSpy);
 
-        // Start hry
-        await engine.start('start');
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'start' }));
+        // Start hry s klíčem scény místo ID
+        await engine.start('forest/intro');
+        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vstup do lesa' }));
+
+        // Kontrola aktuální scény
+        expect(engine.getCurrentScene()).toBeTruthy();
+        expect(engine.getCurrentScene()?.title).toBe('Vstup do lesa');
+
+        // Kontrola klíče scény - nově používáme getCurrentSceneKey
+        expect(engine.getCurrentSceneKey()).toBe('forest/intro');
 
         // Zkontrolujeme dostupné volby - měla by být jen jedna
         let choices = engine.getAvailableChoices();
         expect(choices.length).toBe(1);
-        expect(choices[0].id).toBe('goToForest');
+        expect(choices[0].content).toBe('Prozkoumat les');
 
-        // Jdeme do lesa
-        await engine.selectChoice('goToForest');
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'forest' }));
-        expect(scenes.forest.onEnter).toHaveBeenCalled();
+        // Výběr volby pomocí indexu, ne ID
+        await engine.selectChoice(0);
+        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Lesní mýtina' }));
+        expect(forestClearingScene.onEnter).toHaveBeenCalled();
 
-        // Najdeme mapu
-        await engine.selectChoice('findMap');
+        // Prohledání mýtiny - volba bez přechodu, pouze s efektem
+        await engine.selectChoice(0);
         expect(engine.getState().variables.hasMap).toBe(true);
 
-        // Vrátíme se zpět na start
-        await engine.selectChoice('goBackStart');
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'start' }));
+        // Měli bychom zůstat na stejné scéně
+        expect(engine.getCurrentSceneKey()).toBe('forest/clearing');
+
+        // Vrátíme se zpět na okraj lesa
+        await engine.selectChoice(1);
+        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vstup do lesa' }));
 
         // Teď by měly být dostupné obě volby
         choices = engine.getAvailableChoices();
         expect(choices.length).toBe(2);
 
+        // Kontrola obsahu voleb
+        expect(choices[0].content).toBe('Prozkoumat les');
+        expect(choices[1].content).toBe('Jít do vesnice');
+
         // Jdeme do vesnice, která byla dříve nedostupná
-        await engine.selectChoice('goToVillage');
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'village' }));
-        expect(scenes.village.onEnter).toHaveBeenCalled();
+        await engine.selectChoice(1);
+        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vesnické náměstí' }));
+        expect(villageSquareScene.onEnter).toHaveBeenCalled();
 
         // Kontrola stavu
         const state = engine.getState();
-        expect(state.visitedScenes.size).toBe(3); // start, forest, village
-        expect(state.visitedScenes.has('forest')).toBe(true);
-        expect(state.visitedScenes.has('village')).toBe(true);
+        // Kontrola, že scény jsou sledovány podle klíče, ne ID
+        expect(state.visitedScenes.size).toBe(3);
+        expect(state.visitedScenes.has('forest/intro')).toBe(true);
+        expect(state.visitedScenes.has('forest/clearing')).toBe(true);
+        expect(state.visitedScenes.has('village/square')).toBe(true);
     });
 
-    test('should handle serialization and deserialization', async () => {
-        await engine.start('start');
-        await engine.selectChoice('goToForest');
-        await engine.selectChoice('findMap');
+    test('should handle choices without scene transition', async () => {
+        await engine.start('forest/clearing');
+
+        // Zaznamenáme počet volání sceneChanged
+        const sceneChangedSpy = jest.fn();
+        engine.on('sceneChanged', sceneChangedSpy);
+
+        // Volíme možnost, která pouze mění stav bez přechodu
+        await engine.selectChoice(0);
+
+        // Kontrola, že stav byl změněn
+        expect(engine.getState().variables.hasMap).toBe(true);
+
+        // Kontrola, že žádný přechod scény nenastal
+        expect(sceneChangedSpy).not.toHaveBeenCalled();
+        expect(engine.getCurrentSceneKey()).toBe('forest/clearing');
+    });
+
+    test('should handle serialization and deserialization with new keys', async () => {
+        await engine.start('forest/intro');
+        await engine.selectChoice(0); // Jít do lesa
+        await engine.selectChoice(0); // Prohledat mýtinu - nastavujeme hasMap na true
 
         // Serializujeme stav
         const serializedState = engine.getStateManager().serialize();
 
         // Vytvoříme novou instanci enginu
-        const newSceneLoader = new GenericContentLoader<Scene>();
-        newSceneLoader.registerContent(scenes);
-
+        const scenes = defineScenes({
+            'forest/intro': forestIntroScene,
+            'forest/clearing': forestClearingScene,
+            'village/square': villageSquareScene
+        });
+        const newSceneLoader = createSceneLoader(scenes);
         const newEngine = new GameEngine({
-            loaders: {
-                scenes: newSceneLoader
-            }
+            sceneLoader: newSceneLoader
         });
 
         // Nastavíme deserializovaný stav
@@ -149,14 +182,14 @@ describe('GameEngine Integration', () => {
         // Zkontrolujeme, že stav byl správně obnoven
         const state = newEngine.getState();
         expect(state.variables.hasMap).toBe(true);
-        expect(state.visitedScenes.has('forest')).toBe(true);
+        expect(state.visitedScenes.has('forest/clearing')).toBe(true);
 
         // Měli bychom být schopni pokračovat ve hře
-        await newEngine.start('start'); // Přejde do poslední známé scény
+        await newEngine.start('forest/intro'); // Přejde do poslední známé scény
 
         // Nyní by měla být dostupná volba jít do vesnice
         const choices = newEngine.getAvailableChoices();
         expect(choices.length).toBe(2);
-        expect(choices.some(c => c.id === 'goToVillage')).toBe(true);
+        expect(choices.some(c => c.content === 'Jít do vesnice')).toBe(true);
     });
 });

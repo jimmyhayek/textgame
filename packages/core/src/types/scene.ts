@@ -1,27 +1,90 @@
 import { GameState } from './state';
 import { Effect } from './effect';
 
-export type SceneId = string;
+/**
+ * Typ pro klíč scény (typicky odvozeno od cesty k souboru)
+ */
+export type SceneKey = string;
 
+/**
+ * Reprezentuje volbu v rámci scény
+ */
 export interface Choice {
-  id: string;
-  text: string | ((state: GameState) => string);
-  nextScene: string | ((state: GameState) => string);
-  condition?: (state: GameState) => boolean;
-  effects?: Effect[];
-  metadata?: Record<string, any>;
-}
-
-export interface Scene {
-  id: SceneId;
-  title: string;
+  /**
+   * Obsah volby zobrazený hráči, může být statický nebo dynamický
+   */
   content: string | ((state: GameState) => string);
-  choices: Choice[];
-  onEnter?: (state: GameState, engine: any) => void;
-  onExit?: (state: GameState, engine: any) => void;
+
+  /**
+   * Volitelný klíč scény, na kterou se přejde po výběru této volby
+   * Může být statický nebo dynamický
+   */
+  scene?: SceneKey | ((state: GameState) => SceneKey);
+
+  /**
+   * Volitelná podmínka, která určuje, zda je volba dostupná
+   */
+  condition?: (state: GameState) => boolean;
+
+  /**
+   * Efekty, které se aplikují na stav hry po výběru této volby
+   */
+  effects?: Effect[];
+
+  /**
+   * Další metadata pro rozšíření funkcionality
+   */
   metadata?: Record<string, any>;
 }
 
+/**
+ * Reprezentuje scénu ve hře
+ */
+export interface Scene {
+  /**
+   * Titulek scény zobrazený hráči
+   */
+  title: string;
+
+  /**
+   * Obsah scény, může být statický nebo dynamický
+   */
+  content: string | ((state: GameState) => string);
+
+  /**
+   * Dostupné volby v této scéně
+   */
+  choices: Choice[];
+
+  /**
+   * Handler volaný při vstupu do scény
+   */
+  onEnter?: (state: GameState, engine: any) => void;
+
+  /**
+   * Handler volaný při odchodu ze scény
+   */
+  onExit?: (state: GameState, engine: any) => void;
+
+  /**
+   * Další metadata pro rozšíření funkcionality
+   */
+  metadata?: Record<string, any>;
+
+  /**
+   * Interní property obsahující klíč scény
+   * Nastavuje se automaticky při načtení scény
+   * @internal
+   */
+  _key?: SceneKey;
+}
+
+/**
+ * Funkce pro načtení scény
+ */
 export type SceneLoader = () => Promise<{ default: Scene } | Scene>;
-export type SceneDefinition = Scene | SceneLoader;
-export type ScenesRegistry = Record<SceneId, SceneDefinition>;
+
+/**
+ * Registry scén mapující klíče na definice nebo loadery
+ */
+export type ScenesRegistry = Record<SceneKey, Scene | SceneLoader>;

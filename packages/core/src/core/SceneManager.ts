@@ -1,108 +1,108 @@
-import { Scene, Choice, SceneId, GameState } from '../types';
+import { Scene, Choice, SceneKey, GameState } from '../types';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';
 
 /**
- * Manages scenes and transitions between them
+ * Spravuje scény a přechody mezi nimi
  *
- * SceneManager is responsible for loading and caching scenes,
- * handling scene transitions, and providing access to the current scene.
- * It works with immutable state to ensure predictable scene transitions.
+ * SceneManager je zodpovědný za načítání a cachování scén,
+ * zpracování přechodů mezi scénami a poskytování přístupu k aktuální scéně.
+ * Pracuje s neměnným stavem pro zajištění předvídatelných přechodů scén.
  */
 export class SceneManager {
-  /** ID of the current scene */
-  private currentSceneId: SceneId | null = null;
+  /** Klíč aktuální scény */
+  private currentSceneKey: SceneKey | null = null;
 
-  /** Reference to the current scene object */
+  /** Reference na objekt aktuální scény */
   private currentScene: Scene | null = null;
 
-  /** Content loader for scenes */
+  /** Content loader pro scény */
   private sceneLoader: GenericContentLoader<Scene>;
 
   /**
-   * Creates a new SceneManager instance
+   * Vytvoří novou instanci SceneManager
    *
-   * @param sceneLoader The loader to use for loading scenes
+   * @param sceneLoader Loader používaný pro načítání scén
    */
   constructor(sceneLoader: GenericContentLoader<Scene>) {
     this.sceneLoader = sceneLoader;
   }
 
   /**
-   * Transitions to a new scene
+   * Přechod na novou scénu
    *
-   * @param sceneId ID of the scene to transition to
-   * @param state Current game state
-   * @param engine Game engine instance or mock object for testing
-   * @returns Promise that resolves to true if transition was successful, false otherwise
+   * @param sceneKey Klíč scény, na kterou se má přejít
+   * @param state Aktuální herní stav
+   * @param engine Instance herního enginu nebo mock objekt pro testování
+   * @returns Promise, který se vyřeší na true, pokud byl přechod úspěšný, jinak false
    */
   public async transitionToScene(
-      sceneId: SceneId,
+      sceneKey: SceneKey,
       state: GameState,
       engine: any
   ): Promise<boolean> {
     try {
-      const targetScene: Scene = await this.sceneLoader.loadContent(sceneId);
+      const targetScene: Scene = await this.sceneLoader.loadContent(sceneKey);
 
       if (!targetScene) {
-        console.error(`Scene with ID '${sceneId}' not found.`);
+        console.error(`Scene with key '${sceneKey}' not found.`);
         return false;
       }
 
-      // If there's a current scene, call its onExit method
+      // Pokud existuje aktuální scéna, zavolá se její onExit metoda
       if (this.currentScene && this.currentScene.onExit) {
         this.currentScene.onExit(state, engine);
       }
 
-      // Update current scene
-      this.currentSceneId = sceneId;
+      // Aktualizace aktuální scény
+      this.currentSceneKey = sceneKey;
       this.currentScene = targetScene;
 
-      // Update state to track visited scenes
+      // Aktualizace stavu pro sledování navštívených scén
       if (engine.getStateManager && typeof engine.getStateManager === 'function') {
-        // For real usage with GameEngine - safe immutable modification
+        // Pro reálné použití s GameEngine - bezpečná neměnná modifikace
         engine.getStateManager().updateState((draftState: GameState) => {
-          draftState.visitedScenes.add(sceneId);
+          draftState.visitedScenes.add(sceneKey);
         });
       } else {
-        // For tests - direct state modification
-        state.visitedScenes.add(sceneId);
+        // Pro testy - přímá modifikace stavu
+        state.visitedScenes.add(sceneKey);
       }
 
-      // Call onEnter method of the new scene
+      // Zavolání onEnter metody nové scény
       if (targetScene.onEnter) {
         targetScene.onEnter(state, engine);
       }
 
       return true;
     } catch (error) {
-      console.error(`Error transitioning to scene '${sceneId}':`, error);
+      console.error(`Error transitioning to scene '${sceneKey}':`, error);
       return false;
     }
   }
 
   /**
-   * Gets the current scene
+   * Získá aktuální scénu
    *
-   * @returns The current scene or null if no scene is active
+   * @returns Aktuální scéna nebo null, pokud není žádná scéna aktivní
    */
   public getCurrentScene(): Scene | null {
     return this.currentScene;
   }
 
   /**
-   * Gets the ID of the current scene
+   * Získá klíč aktuální scény
    *
-   * @returns The current scene ID or null if no scene is active
+   * @returns Klíč aktuální scény nebo null, pokud není žádná scéna aktivní
    */
-  public getCurrentSceneId(): SceneId | null {
-    return this.currentSceneId;
+  public getCurrentSceneKey(): SceneKey | null {
+    return this.currentSceneKey;
   }
 
   /**
-   * Gets available choices for the current scene, filtered by conditions
+   * Získá dostupné volby pro aktuální scénu, filtrované podle podmínek
    *
-   * @param state Current game state
-   * @returns Array of available choices
+   * @param state Aktuální herní stav
+   * @returns Pole dostupných voleb
    */
   public getAvailableChoices(state: GameState): Choice[] {
     if (!this.currentScene) return [];
@@ -116,20 +116,20 @@ export class SceneManager {
   }
 
   /**
-   * Preloads scenes by IDs
+   * Předem načte scény podle klíčů
    *
-   * @param sceneIds Optional array of scene IDs to preload, preloads all scenes if omitted
-   * @returns Promise that resolves when all scenes are loaded
+   * @param sceneKeys Volitelné pole klíčů scén k načtení, načte všechny scény pokud neuvedeno
+   * @returns Promise, který se vyřeší, když jsou všechny scény načteny
    */
-  public async preloadScenes(sceneIds?: SceneId[]): Promise<void> {
-    return this.sceneLoader.preloadContent(sceneIds);
+  public async preloadScenes(sceneKeys?: SceneKey[]): Promise<void> {
+    return this.sceneLoader.preloadContent(sceneKeys);
   }
 
 
   /**
-   * Gets the loader used by this manager
+   * Získá loader používaný tímto managerem
    *
-   * @returns The content loader for scenes
+   * @returns Content loader pro scény
    */
   public getSceneLoader(): GenericContentLoader<Scene> {
     return this.sceneLoader;

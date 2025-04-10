@@ -1,64 +1,45 @@
 import { GameEngine } from '../core/GameEngine';
-import { Plugin, ContentDefinition, GameState, Scene, SceneId } from '../types';
+import { Plugin, ContentDefinition, GameState, Scene, SceneKey } from '../types';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';
 
 /**
- * Options for creating a game engine
+ * Možnosti pro vytvoření herního enginu
  */
 interface CreateGameEngineOptions {
-  /** Content definitions to register */
+  /** Definice obsahu k registraci */
   content?: ContentDefinition<any>[];
-  /** Plugins to register */
+  /** Pluginy k registraci */
   plugins?: Plugin[];
-  /** Initial game state */
+  /** Počáteční stav hry */
   initialState?: Partial<GameState>;
-  /** Custom content loaders to use */
-  loaders?: {
-    [key: string]: GenericContentLoader<any>;
-  };
+  /** Vlastní content loader pro scény */
+  sceneLoader?: GenericContentLoader<Scene>;
 }
 
 /**
- * Creates a new game engine with the specified options
+ * Vytvoří nový herní engine se specifikovanými možnostmi
  *
- * @param options Options for creating the game engine
- * @returns New game engine instance
+ * @param options Možnosti pro vytvoření herního enginu
+ * @returns Nová instance herního enginu
  */
 export function createGameEngine(options: CreateGameEngineOptions = {}): GameEngine {
   const {
     content = [],
     plugins = [],
     initialState = {},
-    loaders = {}
+    sceneLoader = new GenericContentLoader<Scene>()
   } = options;
 
-  // Prepare final loaders map
-  const finalLoaders: Record<string, GenericContentLoader<any, any>> = {};
-
-  // Create default scene loader if not provided
-  if (!loaders.scenes) {
-    finalLoaders.scenes = new GenericContentLoader<Scene>();
-  }
-
-  // Add all custom loaders
-  Object.entries(loaders).forEach(([type, loader]) => {
-    finalLoaders[type] = loader;
-  });
-
-  // Create the engine with loaders
+  // Vytvoření enginu s loaderem scén
   const engine = new GameEngine({
+    sceneLoader,
     initialState,
-    loaders: finalLoaders
+    plugins
   });
 
-  // Register content with appropriate loaders
+  // Registrace obsahu s příslušnými loadery
   for (const contentDef of content) {
     engine.registerContent(contentDef);
-  }
-
-  // Register plugins
-  for (const plugin of plugins) {
-    engine.registerPlugin(plugin);
   }
 
   return engine;

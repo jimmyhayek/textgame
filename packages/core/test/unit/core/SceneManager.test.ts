@@ -1,21 +1,30 @@
 // test/core/SceneManager.test.ts
 import { SceneManager } from '../../../src/core/SceneManager';
-import { ContentLoader } from '../../../src/core/ContentLoader';
+import { GenericContentLoader } from '../../../src/loaders/GenericContentLoader';
 import { Scene, Choice, GameState } from '../../../src/types';
 
-// Mock ContentLoader
-jest.mock('../../../src/core/ContentLoader');
+// Mock GenericContentLoader
+jest.mock('../../../src/loaders/GenericContentLoader');
 
 describe('SceneManager', () => {
     let sceneManager: SceneManager;
-    let contentLoader: ContentLoader;
+    let sceneLoader: GenericContentLoader<Scene>;
     let mockEngine: any;
     let gameState: GameState;
 
     beforeEach(() => {
-        contentLoader = new ContentLoader() as jest.Mocked<ContentLoader>;
-        mockEngine = { id: 'mockEngine' };
-        sceneManager = new SceneManager(contentLoader);
+        sceneLoader = new GenericContentLoader<Scene>() as jest.Mocked<GenericContentLoader<Scene>>;
+        // Vytvoříme mock pro engine s getStateManager metodou
+        mockEngine = {
+            id: 'mockEngine',
+            // Volitelná implementace getStateManager pro testy
+            getStateManager: jest.fn().mockReturnValue({
+                updateState: jest.fn((updater) => {
+                    updater(gameState);
+                })
+            })
+        };
+        sceneManager = new SceneManager(sceneLoader);
         gameState = { visitedScenes: new Set<string>(), variables: {} };
     });
 
@@ -28,12 +37,12 @@ describe('SceneManager', () => {
             onEnter: jest.fn()
         };
 
-        (contentLoader.loadScene as jest.Mock).mockResolvedValue(testScene);
+        (sceneLoader.loadContent as jest.Mock).mockResolvedValue(testScene);
 
         const result = await sceneManager.transitionToScene('testScene', gameState, mockEngine);
 
         expect(result).toBe(true);
-        expect(contentLoader.loadScene).toHaveBeenCalledWith('testScene');
+        expect(sceneLoader.loadContent).toHaveBeenCalledWith('testScene');
         expect(testScene.onEnter).toHaveBeenCalledWith(gameState, mockEngine);
         expect(gameState.visitedScenes.has('testScene')).toBe(true);
         expect(sceneManager.getCurrentSceneId()).toBe('testScene');
@@ -56,7 +65,7 @@ describe('SceneManager', () => {
             choices: []
         };
 
-        (contentLoader.loadScene as jest.Mock)
+        (sceneLoader.loadContent as jest.Mock)
             .mockResolvedValueOnce(initialScene)
             .mockResolvedValueOnce(nextScene);
 
@@ -67,7 +76,7 @@ describe('SceneManager', () => {
     });
 
     test('should return false when scene load fails', async () => {
-        (contentLoader.loadScene as jest.Mock).mockRejectedValue(new Error('Scene load failed'));
+        (sceneLoader.loadContent as jest.Mock).mockRejectedValue(new Error('Scene load failed'));
 
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
 
@@ -97,7 +106,7 @@ describe('SceneManager', () => {
             choices
         };
 
-        (contentLoader.loadScene as jest.Mock).mockResolvedValue(testScene);
+        (sceneLoader.loadContent as jest.Mock).mockResolvedValue(testScene);
         await sceneManager.transitionToScene('choiceScene', gameState, mockEngine);
 
         // Without flag
@@ -121,9 +130,9 @@ describe('SceneManager', () => {
         expect(choices).toEqual([]);
     });
 
-    // test/core/SceneManager.test.ts - doplňte testy pro tyto scénáře
     test('should handle errors when scene does not exist', async () => {
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+        (sceneLoader.loadContent as jest.Mock).mockResolvedValue(null);
 
         const result = await sceneManager.transitionToScene('non-existent-scene', gameState, mockEngine);
 
@@ -132,12 +141,30 @@ describe('SceneManager', () => {
         consoleSpy.mockRestore();
     });
 
+    test('should handle the case when getStateManager is not available', async () => {
+        // Vytvoříme engine bez getStateManager metody
+        const simpleEngine = { id: 'simpleEngine' };
+
+        const testScene: Scene = {
+            id: 'testScene',
+            title: 'Test Scene',
+            content: 'Test content',
+            choices: []
+        };
+
+        (sceneLoader.loadContent as jest.Mock).mockResolvedValue(testScene);
+
+        const result = await sceneManager.transitionToScene('testScene', gameState, simpleEngine);
+
+        expect(result).toBe(true);
+        expect(gameState.visitedScenes.has('testScene')).toBe(true);
+    });
+
     test('should return empty array when no current scene is set', () => {
         // Zajistit, že není nastaven žádný current scene
-        // Využít getCurrentSceneId() k ověření null
-
         const choices = sceneManager.getAvailableChoices(gameState);
 
         expect(choices).toEqual([]);
+        expect(sceneManager.getCurrentSceneId()).toBeNull();
     });
 });

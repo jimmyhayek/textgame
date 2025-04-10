@@ -1,6 +1,5 @@
 import { Scene, Choice, SceneId, GameState } from '../types';
-import { ContentLoader } from './ContentLoader';
-import { produce } from '../utils/immer';
+import { GenericContentLoader } from '../loaders/GenericContentLoader';
 
 /**
  * Manages scenes and transitions between them
@@ -10,62 +9,66 @@ import { produce } from '../utils/immer';
  * It works with immutable state to ensure predictable scene transitions.
  */
 export class SceneManager {
+  /** ID of the current scene */
   private currentSceneId: SceneId | null = null;
-  private contentLoader: ContentLoader;
+
+  /** Reference to the current scene object */
   private currentScene: Scene | null = null;
+
+  /** Content loader for scenes */
+  private sceneLoader: GenericContentLoader<Scene>;
 
   /**
    * Creates a new SceneManager instance
    *
-   * @param contentLoader - The ContentLoader to use for loading scenes
+   * @param sceneLoader The loader to use for loading scenes
    */
-  constructor(contentLoader: ContentLoader) {
-    this.contentLoader = contentLoader;
+  constructor(sceneLoader: GenericContentLoader<Scene>) {
+    this.sceneLoader = sceneLoader;
   }
 
   /**
    * Transitions to a new scene
    *
-   * @param sceneId - ID of the scene to transition to
-   * @param state - Current game state
-   * @param engine - Game engine instance or mock object for testing
+   * @param sceneId ID of the scene to transition to
+   * @param state Current game state
+   * @param engine Game engine instance or mock object for testing
    * @returns Promise that resolves to true if transition was successful, false otherwise
    */
   public async transitionToScene(
       sceneId: SceneId,
       state: GameState,
-      engine: any // Změněno na 'any' pro podporu testů
+      engine: any
   ): Promise<boolean> {
     try {
-      const targetScene: Scene = await this.contentLoader.loadScene(sceneId);
+      const targetScene: Scene = await this.sceneLoader.loadContent(sceneId);
 
       if (!targetScene) {
         console.error(`Scene with ID '${sceneId}' not found.`);
         return false;
       }
 
-      // Pokud existuje aktuální scéna, zavoláme její onExit metodu
+      // If there's a current scene, call its onExit method
       if (this.currentScene && this.currentScene.onExit) {
         this.currentScene.onExit(state, engine);
       }
 
-      // Aktualizujeme aktuální scénu
+      // Update current scene
       this.currentSceneId = sceneId;
       this.currentScene = targetScene;
 
-      // Pro testy: Přímá modifikace state, protože v testech nemusí existovat StateManager
-      // V reálném kódu při použití GameEngine bude možné použít StateManager
+      // Update state to track visited scenes
       if (engine.getStateManager && typeof engine.getStateManager === 'function') {
-        // Pro reálné použití s GameEngine - bezpečná imutabilní modifikace
+        // For real usage with GameEngine - safe immutable modification
         engine.getStateManager().updateState((draftState: GameState) => {
           draftState.visitedScenes.add(sceneId);
         });
       } else {
-        // Pro testy - přímá modifikace state
+        // For tests - direct state modification
         state.visitedScenes.add(sceneId);
       }
 
-      // Zavoláme onEnter metodu nové scény
+      // Call onEnter method of the new scene
       if (targetScene.onEnter) {
         targetScene.onEnter(state, engine);
       }
@@ -98,7 +101,7 @@ export class SceneManager {
   /**
    * Gets available choices for the current scene, filtered by conditions
    *
-   * @param state - Current game state
+   * @param state Current game state
    * @returns Array of available choices
    */
   public getAvailableChoices(state: GameState): Choice[] {
@@ -110,5 +113,25 @@ export class SceneManager {
       }
       return true;
     });
+  }
+
+  /**
+   * Preloads scenes by IDs
+   *
+   * @param sceneIds Optional array of scene IDs to preload, preloads all scenes if omitted
+   * @returns Promise that resolves when all scenes are loaded
+   */
+  public async preloadScenes(sceneIds?: SceneId[]): Promise<void> {
+    return this.sceneLoader.preloadContent(sceneIds);
+  }
+
+
+  /**
+   * Gets the loader used by this manager
+   *
+   * @returns The content loader for scenes
+   */
+  public getSceneLoader(): GenericContentLoader<Scene> {
+    return this.sceneLoader;
   }
 }

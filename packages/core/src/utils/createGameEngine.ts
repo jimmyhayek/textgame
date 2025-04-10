@@ -1,23 +1,62 @@
-import { GameEngine } from '../core';
-import { Plugin, ScenesDefinition, GameState } from '../types';
+import { GameEngine } from '../core/GameEngine';
+import { Plugin, ContentDefinition, GameState, Scene, SceneId } from '../types';
+import { GenericContentLoader } from '../loaders/GenericContentLoader';
 
-interface GameEngineOptions {
-  scenes?: ScenesDefinition;
+/**
+ * Options for creating a game engine
+ */
+interface CreateGameEngineOptions {
+  /** Content definitions to register */
+  content?: ContentDefinition<any>[];
+  /** Plugins to register */
   plugins?: Plugin[];
+  /** Initial game state */
   initialState?: Partial<GameState>;
+  /** Custom content loaders to use */
+  loaders?: {
+    [key: string]: GenericContentLoader<any>;
+  };
 }
 
-export function createGameEngine(options: GameEngineOptions = {}): GameEngine {
-  const { scenes, plugins = [], initialState = {} } = options;
+/**
+ * Creates a new game engine with the specified options
+ *
+ * @param options Options for creating the game engine
+ * @returns New game engine instance
+ */
+export function createGameEngine(options: CreateGameEngineOptions = {}): GameEngine {
+  const {
+    content = [],
+    plugins = [],
+    initialState = {},
+    loaders = {}
+  } = options;
 
-  const engine = new GameEngine({
-    initialState,
-  });
+  // Prepare final loaders map
+  const finalLoaders: Record<string, GenericContentLoader<any, any>> = {};
 
-  if (scenes) {
-    engine.getContentLoader().registerScenes(scenes.content);
+  // Create default scene loader if not provided
+  if (!loaders.scenes) {
+    finalLoaders.scenes = new GenericContentLoader<Scene>();
   }
 
+  // Add all custom loaders
+  Object.entries(loaders).forEach(([type, loader]) => {
+    finalLoaders[type] = loader;
+  });
+
+  // Create the engine with loaders
+  const engine = new GameEngine({
+    initialState,
+    loaders: finalLoaders
+  });
+
+  // Register content with appropriate loaders
+  for (const contentDef of content) {
+    engine.registerContent(contentDef);
+  }
+
+  // Register plugins
   for (const plugin of plugins) {
     engine.registerPlugin(plugin);
   }

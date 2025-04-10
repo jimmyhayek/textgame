@@ -7,13 +7,16 @@ import {
   Plugin,
   GameEventType,
   EventListener,
+  ContentDefinition,
+  ContentRegistry
 } from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
 import { EffectManager } from './EffectManager';
-import { ContentLoader } from './ContentLoader';
 import { PluginManager } from './PluginManager';
+import { GenericContentLoader } from '../loaders/GenericContentLoader';
+import { LoaderRegistry } from '../loaders/LoaderRegistry';
 
 /**
  * Configuration options for the game engine initialization
@@ -21,6 +24,16 @@ import { PluginManager } from './PluginManager';
 export interface GameEngineOptions {
   /** Initial game state that will be merged with the default empty state */
   initialState?: Partial<GameState>;
+
+
+  /** Content loaders to be used by the engine */
+  loaders?: {
+    /** Additional loaders by type */
+    [key: string]: GenericContentLoader<any>;
+  };
+
+  /** Plugins to be registered with the engine */
+  plugins?: Plugin[];
 }
 
 /**
@@ -31,34 +44,63 @@ export interface GameEngineOptions {
  * It uses Immer under the hood for immutable state management.
  */
 export class GameEngine {
+  /** Event emitter for game events */
   private readonly eventEmitter: EventEmitter;
+
+  /** State manager for game state */
   private readonly stateManager: StateManager;
-  private readonly contentLoader: ContentLoader;
+
+  /** Scene manager for scene transitions */
   private readonly sceneManager: SceneManager;
+
+  /** Effect manager for processing effects */
   private readonly effectManager: EffectManager;
+
+  /** Plugin manager for plugin registration */
   private readonly pluginManager: PluginManager;
+
+  /** Loader registry for content loaders */
+  private readonly loaderRegistry: LoaderRegistry;
+
+  /** Flag indicating if the game is running */
   private isRunning: boolean = false;
 
   /**
    * Creates a new game engine instance
    *
-   * @param options - Configuration options for the engine
+   * @param options Configuration options for the engine
    */
   constructor(options: GameEngineOptions = {}) {
-    const { initialState = {} } = options;
+    const {
+      initialState = {},
+      loaders = {
+        scenes: new GenericContentLoader<Scene>()
+      },
+      plugins = []
+    } = options;
 
     this.eventEmitter = new EventEmitter();
     this.stateManager = new StateManager(initialState);
-    this.contentLoader = new ContentLoader();
-    this.sceneManager = new SceneManager(this.contentLoader);
+    this.loaderRegistry = new LoaderRegistry();
+
+    // Register all provided loaders
+    Object.entries(loaders).forEach(([type, loader]) => {
+      this.loaderRegistry.registerLoader(type, loader);
+    });
+
+    // Initialize scene manager with the scene loader
+    this.sceneManager = new SceneManager(loaders.scenes);
     this.effectManager = new EffectManager();
     this.pluginManager = new PluginManager(this);
+
+    // Initialize plugins
+    plugins.forEach(plugin => this.registerPlugin(plugin));
   }
 
   /**
    * Starts the game beginning with the specified scene
    *
-   * @param initialSceneId - ID of the scene to start the game with
+   * @param initialSceneId ID of the scene to start the game with
    * @returns Promise that resolves after successful transition to the initial scene
    * @throws Error if the scene doesn't exist or can't be transitioned to
    */
@@ -90,7 +132,7 @@ export class GameEngine {
   /**
    * Selects a choice from the current scene and transitions to the next scene
    *
-   * @param choiceId - ID of the choice to select
+   * @param choiceId ID of the choice to select
    * @returns Promise that resolves after completing the transition to the new scene
    */
   public async selectChoice(choiceId: string): Promise<void> {
@@ -103,7 +145,7 @@ export class GameEngine {
       return;
     }
 
-    // Získat aktuální stav
+    // Get current state
     const currentState = this.stateManager.getState();
 
     if (choice.condition && !choice.condition(currentState)) {
@@ -113,14 +155,14 @@ export class GameEngine {
 
     this.eventEmitter.emit('choiceSelected', { choice });
 
-    // Aplikovat efekty, pokud existují
+    // Apply effects if they exist
     if (choice.effects && choice.effects.length > 0) {
       const newState = this.effectManager.applyEffects(choice.effects, currentState);
       this.stateManager.setState(newState);
       this.eventEmitter.emit('stateChanged', this.stateManager.getState());
     }
 
-    // Získat ID další scény
+    // Get next scene ID
     let nextSceneId: string;
     if (typeof choice.nextScene === 'function') {
       nextSceneId = choice.nextScene(this.stateManager.getState());
@@ -128,7 +170,7 @@ export class GameEngine {
       nextSceneId = choice.nextScene;
     }
 
-    // Přejít na další scénu
+    // Transition to next scene
     const success = await this.sceneManager.transitionToScene(
         nextSceneId,
         this.stateManager.getState(),
@@ -141,10 +183,45 @@ export class GameEngine {
   }
 
   /**
+   * Registers a content definition with the appropriate loader
+   *
+   * @param contentDefinition Content definition to register
+   * @returns true if registration was successful, false otherwise
+   */
+  public registerContent<T extends ContentRegistry<any, any>>(
+      contentDefinition: ContentDefinition<T>
+  ): boolean {
+    const { type, content } = contentDefinition;
+    const loader = this.loaderRegistry.getLoader(type);
+
+    if (!loader) {
+      console.warn(`No loader registered for content type '${type}'`);
+      return false;
+    }
+
+    loader.registerContent(content);
+    return true;
+  }
+
+  /**
+   * Gets a content loader by type
+   *
+   * @template T Content type
+   * @template K Content ID type
+   * @param type Content type identifier
+   * @returns Loader for the specified content type or undefined if not found
+   */
+  public getLoader<T extends object, K extends string = string>(
+      type: string
+  ): GenericContentLoader<T, K> | undefined {
+    return this.loaderRegistry.getLoader<T, K>(type);
+  }
+
+  /**
    * Registers a listener for the specified event type
    *
-   * @param eventType - Type of event to register the listener for
-   * @param listener - Function to be called when the event occurs
+   * @param eventType Type of event to register the listener for
+   * @param listener Function to be called when the event occurs
    */
   public on(eventType: GameEventType, listener: EventListener): void {
     this.eventEmitter.on(eventType, listener);
@@ -153,8 +230,8 @@ export class GameEngine {
   /**
    * Unregisters a listener for the specified event type
    *
-   * @param eventType - Type of event to unregister the listener from
-   * @param listener - Function that was previously registered as a listener
+   * @param eventType Type of event to unregister the listener from
+   * @param listener Function that was previously registered as a listener
    */
   public off(eventType: GameEventType, listener: EventListener): void {
     this.eventEmitter.off(eventType, listener);
@@ -163,8 +240,8 @@ export class GameEngine {
   /**
    * Emits an event of the specified type with optional data
    *
-   * @param eventType - Type of event to emit
-   * @param data - Optional data to pass to the listeners
+   * @param eventType Type of event to emit
+   * @param data Optional data to pass to the listeners
    */
   public emit(eventType: GameEventType, data?: any): void {
     this.eventEmitter.emit(eventType, data);
@@ -203,7 +280,7 @@ export class GameEngine {
    * Plugins allow extending engine functionality with features like inventory systems,
    * character management, locations, etc.
    *
-   * @param plugin - Plugin to register
+   * @param plugin Plugin to register
    */
   public registerPlugin(plugin: Plugin): void {
     this.pluginManager.registerPlugin(plugin);
@@ -212,7 +289,7 @@ export class GameEngine {
   /**
    * Unregisters a plugin from the game engine
    *
-   * @param pluginName - Name of the plugin to unregister
+   * @param pluginName Name of the plugin to unregister
    */
   public unregisterPlugin(pluginName: string): void {
     this.pluginManager.unregisterPlugin(pluginName);
@@ -221,8 +298,8 @@ export class GameEngine {
   /**
    * Returns a plugin by name
    *
-   * @template T - Type of plugin expected
-   * @param pluginName - Name of the plugin to retrieve
+   * @template T Type of plugin expected
+   * @param pluginName Name of the plugin to retrieve
    * @returns Plugin of the requested type or undefined if not found
    */
   public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
@@ -235,8 +312,8 @@ export class GameEngine {
    * Allows extending the engine with custom effect types that can be triggered
    * during scene transitions or player interactions.
    *
-   * @param effectType - Type of effect to register the processor for
-   * @param processor - Function to process effects of the specified type
+   * @param effectType Type of effect to register the processor for
+   * @param processor Function to process effects of the specified type
    */
   public registerEffectProcessor(
       effectType: string,
@@ -246,56 +323,56 @@ export class GameEngine {
   }
 
   /**
-   * Returns the ContentLoader responsible for loading game content
+   * Gets the scene manager instance
    *
-   * @returns The ContentLoader instance
-   */
-  public getContentLoader(): ContentLoader {
-    return this.contentLoader;
-  }
-
-  /**
-   * Returns the EventEmitter responsible for event management
-   *
-   * @returns The EventEmitter instance
-   */
-  public getEventEmitter(): EventEmitter {
-    return this.eventEmitter;
-  }
-
-  /**
-   * Returns the StateManager responsible for game state management
-   *
-   * @returns The StateManager instance
-   */
-  public getStateManager(): StateManager {
-    return this.stateManager;
-  }
-
-  /**
-   * Returns the SceneManager responsible for scene and transition management
-   *
-   * @returns The SceneManager instance
+   * @returns Scene manager
    */
   public getSceneManager(): SceneManager {
     return this.sceneManager;
   }
 
   /**
-   * Returns the EffectManager responsible for processing effects
+   * Gets the state manager instance
    *
-   * @returns The EffectManager instance
+   * @returns State manager
+   */
+  public getStateManager(): StateManager {
+    return this.stateManager;
+  }
+
+  /**
+   * Gets the effect manager instance
+   *
+   * @returns Effect manager
    */
   public getEffectManager(): EffectManager {
     return this.effectManager;
   }
 
   /**
-   * Returns the PluginManager responsible for plugin management
+   * Gets the plugin manager instance
    *
-   * @returns The PluginManager instance
+   * @returns Plugin manager
    */
   public getPluginManager(): PluginManager {
     return this.pluginManager;
+  }
+
+  /**
+   * Gets the event emitter instance
+   *
+   * @returns Event emitter
+   */
+  public getEventEmitter(): EventEmitter {
+    return this.eventEmitter;
+  }
+
+  /**
+   * Gets the loader registry instance
+   *
+   * @returns Loader registry
+   */
+  public getLoaderRegistry(): LoaderRegistry {
+    return this.loaderRegistry;
   }
 }

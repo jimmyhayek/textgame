@@ -1,14 +1,14 @@
-import { ContentLoader } from '../../../src/core/ContentLoader';
-import { Scene, SceneId } from '../../../src/types';
+import { GenericContentLoader } from '../../../src/loaders/GenericContentLoader';
+import { Scene } from '../../../src/types';
 
-describe('ContentLoader', () => {
-    let contentLoader: ContentLoader;
+describe('GenericContentLoader', () => {
+    let contentLoader: GenericContentLoader<Scene>;
 
     beforeEach(() => {
-        contentLoader = new ContentLoader();
+        contentLoader = new GenericContentLoader<Scene>();
     });
 
-    test('should register and load static scenes', async () => {
+    test('should register and load static content', async () => {
         const testScene: Scene = {
             id: 'test-scene',
             title: 'Test Scene',
@@ -16,15 +16,15 @@ describe('ContentLoader', () => {
             choices: []
         };
 
-        contentLoader.registerScenes({
+        contentLoader.registerContent({
             'test-scene': testScene
         });
 
-        const loadedScene = await contentLoader.loadScene('test-scene');
+        const loadedScene = await contentLoader.loadContent('test-scene');
         expect(loadedScene).toEqual(testScene);
     });
 
-    test('should load scenes via dynamic import', async () => {
+    test('should load content via dynamic import', async () => {
         const testScene: Scene = {
             id: 'dynamic-scene',
             title: 'Dynamic Scene',
@@ -35,20 +35,20 @@ describe('ContentLoader', () => {
         // Mock dynamický import
         const dynamicLoader = jest.fn().mockResolvedValue({ default: testScene });
 
-        contentLoader.registerScenes({
+        contentLoader.registerContent({
             'dynamic-scene': dynamicLoader
         });
 
-        const loadedScene = await contentLoader.loadScene('dynamic-scene');
+        const loadedScene = await contentLoader.loadContent('dynamic-scene');
         expect(dynamicLoader).toHaveBeenCalled();
         expect(loadedScene).toEqual(testScene);
     });
 
-    test('should throw error for non-existent scene', async () => {
-        await expect(contentLoader.loadScene('non-existent')).rejects.toThrow();
+    test('should throw error for non-existent content', async () => {
+        await expect(contentLoader.loadContent('non-existent')).rejects.toThrow();
     });
 
-    test('should return cached scene on subsequent loads', async () => {
+    test('should return cached content on subsequent loads', async () => {
         const testScene: Scene = {
             id: 'cached-scene',
             title: 'Cached Scene',
@@ -56,49 +56,49 @@ describe('ContentLoader', () => {
             choices: []
         };
 
-        contentLoader.registerScenes({
+        contentLoader.registerContent({
             'cached-scene': testScene
         });
 
-        const firstLoad = await contentLoader.loadScene('cached-scene');
-        const secondLoad = await contentLoader.loadScene('cached-scene');
+        const firstLoad = await contentLoader.loadContent('cached-scene');
+        const secondLoad = await contentLoader.loadContent('cached-scene');
 
         expect(firstLoad).toBe(secondLoad); // Strict equality - same object
     });
 
-    test('should get all scene IDs', () => {
-        contentLoader.registerScenes({
+    test('should get all content IDs', () => {
+        contentLoader.registerContent({
             'scene1': { id: 'scene1', title: 'Scene 1', content: 'Content 1', choices: [] },
             'scene2': { id: 'scene2', title: 'Scene 2', content: 'Content 2', choices: [] }
         });
 
-        const sceneIds = contentLoader.getSceneIds();
-        expect(sceneIds).toContain('scene1');
-        expect(sceneIds).toContain('scene2');
-        expect(sceneIds.length).toBe(2);
+        const contentIds = contentLoader.getContentIds();
+        expect(contentIds).toContain('scene1');
+        expect(contentIds).toContain('scene2');
+        expect(contentIds.length).toBe(2);
     });
 
-    test('should check if scene exists', () => {
-        contentLoader.registerScenes({
+    test('should check if content exists', () => {
+        contentLoader.registerContent({
             'existing-scene': { id: 'existing-scene', title: 'Exists', content: 'Content', choices: [] }
         });
 
-        expect(contentLoader.hasScene('existing-scene')).toBe(true);
-        expect(contentLoader.hasScene('non-existing-scene')).toBe(false);
+        expect(contentLoader.hasContent('existing-scene')).toBe(true);
+        expect(contentLoader.hasContent('non-existing-scene')).toBe(false);
     });
 
-    test('should preload multiple scenes', async () => {
-        contentLoader.registerScenes({
+    test('should preload multiple content items', async () => {
+        contentLoader.registerContent({
             'scene1': { id: 'scene1', title: 'Scene 1', content: 'Content 1', choices: [] },
             'scene2': { id: 'scene2', title: 'Scene 2', content: 'Content 2', choices: [] },
             'scene3': { id: 'scene3', title: 'Scene 3', content: 'Content 3', choices: [] }
         });
 
-        await contentLoader.preloadScenes(['scene1', 'scene2']);
+        await contentLoader.preloadContent(['scene1', 'scene2']);
 
         // Po preloadingu by měly být scény v cache
-        const loadedScene1 = await contentLoader.loadScene('scene1');
-        const loadedScene2 = await contentLoader.loadScene('scene2');
+        const loadedScene1 = await contentLoader.loadContent('scene1');
+        const loadedScene2 = await contentLoader.loadContent('scene2');
 
         expect(loadedScene1).toBeDefined();
         expect(loadedScene2).toBeDefined();
@@ -122,13 +122,13 @@ describe('ContentLoader', () => {
         });
 
         // Registrace scény s pomalým loaderem
-        contentLoader.registerScenes({
+        contentLoader.registerContent({
             'slow-scene': slowLoader
         });
 
         // Spuštění dvou paralelních načítání
-        const promise1 = contentLoader.loadScene('slow-scene');
-        const promise2 = contentLoader.loadScene('slow-scene');
+        const promise1 = contentLoader.loadContent('slow-scene');
+        const promise2 = contentLoader.loadContent('slow-scene');
 
         // I když promise objekty mohou být různé, měly by odkazovat na stejné načítání
         // Tuto optimalizaci testujeme tak, že ověříme, že loader byl volán pouze jednou
@@ -155,18 +155,18 @@ describe('ContentLoader', () => {
         // Funkce, která vrací přímo scénu, ne objekt s default property
         const directLoader = jest.fn().mockResolvedValue(sceneDefinition);
 
-        contentLoader.registerScenes({
+        contentLoader.registerContent({
             'direct-scene': directLoader
         });
 
-        const loadedScene = await contentLoader.loadScene('direct-scene');
+        const loadedScene = await contentLoader.loadContent('direct-scene');
 
         expect(directLoader).toHaveBeenCalled();
         expect(loadedScene).toBe(sceneDefinition);
         expect(loadedScene.id).toBe('direct-scene');
     });
 
-    test('should preload all registered scenes when no ids specified', async () => {
+    test('should preload all registered content when no ids specified', async () => {
         // Registrujeme několik scén
         const mockScenes = {
             'scene1': { id: 'scene1', title: 'Scene 1', content: 'Content 1', choices: [] },
@@ -174,21 +174,21 @@ describe('ContentLoader', () => {
             'scene3': { id: 'scene3', title: 'Scene 3', content: 'Content 3', choices: [] }
         };
 
-        contentLoader.registerScenes(mockScenes);
+        contentLoader.registerContent(mockScenes);
 
-        // Mockujeme loadScene metodu, abychom mohli sledovat její volání
-        const loadSceneSpy = jest.spyOn(contentLoader, 'loadScene');
+        // Mockujeme loadContent metodu, abychom mohli sledovat její volání
+        const loadContentSpy = jest.spyOn(contentLoader, 'loadContent');
 
-        // Zavoláme preloadScenes bez specifikace scén
-        await contentLoader.preloadScenes();
+        // Zavoláme preloadContent bez specifikace scén
+        await contentLoader.preloadContent();
 
-        // Ověříme, že loadScene byla volána pro všechny registrované scény
-        expect(loadSceneSpy).toHaveBeenCalledTimes(3);
-        expect(loadSceneSpy).toHaveBeenCalledWith('scene1');
-        expect(loadSceneSpy).toHaveBeenCalledWith('scene2');
-        expect(loadSceneSpy).toHaveBeenCalledWith('scene3');
+        // Ověříme, že loadContent byla volána pro všechny registrované scény
+        expect(loadContentSpy).toHaveBeenCalledTimes(3);
+        expect(loadContentSpy).toHaveBeenCalledWith('scene1');
+        expect(loadContentSpy).toHaveBeenCalledWith('scene2');
+        expect(loadContentSpy).toHaveBeenCalledWith('scene3');
 
         // Vyčistíme spy
-        loadSceneSpy.mockRestore();
+        loadContentSpy.mockRestore();
     });
 });

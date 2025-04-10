@@ -1,4 +1,3 @@
-export * from './ContentLoader';
 export * from './EffectManager';
 export * from './EventEmitter';
 export * from './GameEngine';

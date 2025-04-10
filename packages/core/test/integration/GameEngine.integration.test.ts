@@ -1,9 +1,11 @@
 import { GameEngine } from '../../src/core/GameEngine';
 import { Scene, Choice, GameState } from '../../src/types';
+import { GenericContentLoader } from '../../src/loaders/GenericContentLoader';
 
 // Skutečná instance, ne mock
 describe('GameEngine Integration', () => {
     let engine: GameEngine;
+    let sceneLoader: GenericContentLoader<Scene>;
 
     // Definujeme testovací scény
     const scenes = {
@@ -66,9 +68,18 @@ describe('GameEngine Integration', () => {
         // Resetujeme všechny mock funkce
         jest.clearAllMocks();
 
-        // Vytvoříme novou instanci enginu pro každý test
-        engine = new GameEngine();
-        engine.getContentLoader().registerScenes(scenes);
+        // Vytvoříme loader pro scény
+        sceneLoader = new GenericContentLoader<Scene>();
+
+        // Registrujeme scény do loaderu
+        sceneLoader.registerContent(scenes);
+
+        // Vytvoříme novou instanci enginu s loaderem
+        engine = new GameEngine({
+            loaders: {
+                scenes: sceneLoader
+            }
+        });
     });
 
     test('should handle game flow correctly', async () => {
@@ -123,8 +134,14 @@ describe('GameEngine Integration', () => {
         const serializedState = engine.getStateManager().serialize();
 
         // Vytvoříme novou instanci enginu
-        const newEngine = new GameEngine();
-        newEngine.getContentLoader().registerScenes(scenes);
+        const newSceneLoader = new GenericContentLoader<Scene>();
+        newSceneLoader.registerContent(scenes);
+
+        const newEngine = new GameEngine({
+            loaders: {
+                scenes: newSceneLoader
+            }
+        });
 
         // Nastavíme deserializovaný stav
         newEngine.getStateManager().deserialize(serializedState);

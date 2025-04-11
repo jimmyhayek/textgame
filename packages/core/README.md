@@ -31,72 +31,67 @@ npm install @pabitel/core
 Here's a simple example that shows how to create a basic game:
 
 ```typescript
-import { createGameEngine, defineScenes, GenericContentLoader } from '@pabitel/core';
+import { createGameEngine, defineScene, defineScenes, createSceneLoader } from '@pabitel/core';
 
 // Define your scenes
-const scenes = defineScenes({
-  'start': {
-    id: 'start',
+const startScene = defineScene({
     title: 'The Beginning',
     content: 'You wake up in a small room. There is a door to the north and a window to the east.',
     choices: [
-      {
-        id: 'door',
-        text: 'Go through the door',
-        nextScene: 'corridor'
-      },
-      {
-        id: 'window',
-        text: 'Look through the window',
-        nextScene: 'window_view'
-      }
+        {
+            content: 'Go through the door',
+            scene: 'corridor'
+        },
+        {
+            content: 'Look through the window',
+            scene: 'window-view'
+        }
     ]
-  },
-  'corridor': {
-    id: 'corridor',
+});
+
+const corridorScene = defineScene({
     title: 'Dark Corridor',
     content: 'You enter a long, dark corridor.',
     choices: [
-      {
-        id: 'back',
-        text: 'Go back to the room',
-        nextScene: 'start'
-      }
+        {
+            content: 'Go back to the room',
+            scene: 'start'
+        }
     ]
-  },
-  'window_view': {
-    id: 'window_view',
+});
+
+const windowViewScene = defineScene({
     title: 'Window View',
     content: 'Through the window, you see a beautiful landscape.',
     choices: [
-      {
-        id: 'back',
-        text: 'Step back from the window',
-        nextScene: 'start'
-      }
+        {
+            content: 'Step back from the window',
+            scene: 'start'
+        }
     ]
-  }
 });
 
-// Create a loader for scenes
-const sceneLoader = new GenericContentLoader();
-sceneLoader.registerContent(scenes.content);
+// Register scenes
+const scenes = defineScenes({
+    'start': startScene,
+    'corridor': corridorScene,
+    'window-view': windowViewScene
+});
 
 // Create the game engine
+const sceneLoader = createSceneLoader(scenes);
 const engine = createGameEngine({
-  loaders: {
-    scenes: sceneLoader
-  }
+    sceneLoader
 });
 
 // Start the game
 engine.start('start').then(() => {
-  console.log('Game started at scene:', engine.getCurrentScene()?.title);
-  console.log(engine.getCurrentScene()?.content);
-  console.log('Available choices:');
-  engine.getAvailableChoices().forEach(choice => {
-    console.log(`- ${choice.text}`);
-  });
+    console.log('Game started at scene:', engine.getCurrentScene()?.title);
+    console.log(engine.getCurrentScene()?.content);
+    console.log('Available choices:');
+    engine.getAvailableChoices().forEach((choice, index) => {
+        console.log(`${index}. ${choice.content}`);
+    });
 });
 ```
 
@@ -108,7 +103,6 @@ The basic building blocks of any game created with Pabitel Core are scenes and c
 
 ```typescript
 interface Scene {
-  id: string;
   title: string;
   content: string | ((state: GameState) => string);
   choices: Choice[];
@@ -118,36 +112,25 @@ interface Scene {
 }
 
 interface Choice {
-  id: string;
-  text: string | ((state: GameState) => string);
-  nextScene: string | ((state: GameState) => string);
+  content: string | ((state: GameState) => string);
+  scene?: SceneKey | ((state: GameState) => SceneKey);
   condition?: (state: GameState) => boolean;
   effects?: Effect[];
   metadata?: Record<string, any>;
 }
 ```
 
-### Content Loaders
+### Content Loaders and Keys
 
-Pabitel Core uses a generic content loader system that supports lazy loading for any type of game content. This allows you to organize your content however you want and load it on demand.
+Pabitel Core uses a path-based key system for content identification, similar to file-based routing in modern web frameworks. This allows for intuitive organization of game content:
 
 ```typescript
-// Create a loader for scenes
-const sceneLoader = new GenericContentLoader<Scene>();
-
-// Register content directly
-sceneLoader.registerContent({
-  'scene1': { /* scene definition */ },
-  'scene2': { /* scene definition */ }
+// Scenes are identified by their keys, which can be path-like
+const scenes = defineScenes({
+  'forest/entrance': entranceScene,
+  'forest/clearing': clearingScene,
+  'village/square': squareScene
 });
-
-// Or use lazy loading
-sceneLoader.registerContent({
-  'heavyScene': () => import('./scenes/heavyScene')
-});
-
-// Get content when needed
-const scene = await sceneLoader.loadContent('scene1');
 ```
 
 ### Game State
@@ -169,9 +152,8 @@ Effects are actions that change the game state. They can be triggered by choices
 ```typescript
 // Define a choice with effects
 {
-  id: 'take_sword',
-  text: 'Take the sword',
-  nextScene: 'cave_entrance',
+  content: 'Take the sword',
+  scene: 'cave/entrance',
   effects: [
     { 
       type: 'SET_VARIABLE', 
@@ -187,6 +169,30 @@ Effects are actions that change the game state. They can be triggered by choices
 }
 ```
 
+### Choices without scene transitions
+
+Choices don't always need to lead to a new scene. You can create choices that just apply effects while staying on the current scene:
+
+```typescript
+const forestScene = defineScene({
+  title: 'Forest',
+  content: 'You are in a dense forest...',
+  choices: [
+    {
+      content: 'Search the area',
+      // No scene property - only effects
+      effects: [
+        { type: 'SET_VARIABLE', variable: 'foundMap', value: true }
+      ]
+    },
+    {
+      content: 'Continue deeper',
+      scene: 'forest/clearing'
+    }
+  ]
+});
+```
+
 ### Plugins
 
 The plugin system allows you to extend the engine with custom functionality. Plugins can add new content types, effects, or other features.
@@ -196,30 +202,31 @@ import { AbstractPlugin } from '@pabitel/core';
 
 // Create a custom plugin
 class InventoryPlugin extends AbstractPlugin {
-  constructor() {
-    super('inventory', {});
-  }
+    constructor() {
+        super('inventory', {});
+    }
 
-  protected override setupLoaders() {
-    // Set up content loaders for items
-    const itemLoader = new GenericContentLoader();
-    this.loaders.set('items', itemLoader);
-  }
+    protected override setupLoaders() {
+        // Set up content loaders for items
+        const itemLoader = new GenericContentLoader();
+        this.loaders.set('items', itemLoader);
+    }
 
-  protected override registerEffectProcessors() {
-    this.engine?.registerEffectProcessor('ADD_ITEM', (effect, state) => {
-      if (!state.inventory) {
-        state.inventory = [];
-      }
-      state.inventory.push(effect.item);
-    });
-  }
+    protected override registerEffectProcessors() {
+        this.engine?.registerEffectProcessor('ADD_ITEM', (effect, state) => {
+            if (!state.inventory) {
+                state.inventory = [];
+            }
+            state.inventory.push(effect.item);
+        });
+    }
 }
 
 // Use the plugin
 const inventoryPlugin = new InventoryPlugin();
 const engine = createGameEngine({
-  plugins: [inventoryPlugin]
+    sceneLoader,
+    plugins: [inventoryPlugin]
 });
 ```
 

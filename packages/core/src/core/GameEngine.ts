@@ -7,7 +7,11 @@ import {
   GameEventType,
   EventListener,
   ContentDefinition,
-  ContentRegistry, SceneKey
+  ContentRegistry,
+  SceneKey,
+  SaveMetadata,
+  SaveOptions,
+  AutoSaveOptions
 } from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
@@ -16,6 +20,7 @@ import { EffectManager } from './EffectManager';
 import { PluginManager } from './PluginManager';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';
 import { LoaderRegistry } from '../loaders/LoaderRegistry';
+import { SaveManager } from '../save/SaveManager';
 
 export interface GameEngineOptions {
   /** Loader scén pro načítání herního obsahu */
@@ -26,6 +31,12 @@ export interface GameEngineOptions {
 
   /** Pluginy, které budou registrovány s enginem */
   plugins?: Plugin[];
+
+  /** SaveManager pro ukládání a načítání her (volitelné) */
+  saveManager?: SaveManager;
+
+  /** Verze enginu pro ukládání her (volitelné) */
+  engineVersion?: string;
 }
 
 /**
@@ -54,33 +65,68 @@ export class GameEngine {
   /** Loader registry for content loaders */
   private readonly loaderRegistry: LoaderRegistry;
 
+  /** Save manager for saving and loading games */
+  private readonly saveManager: SaveManager;
+
+  /** Engine version */
+  private readonly engineVersion: string;
+
   /** Flag indicating if the game is running */
   private isRunning: boolean = false;
 
+  /**
+   * Creates a new GameEngine instance
+   *
+   * @param options Options for the game engine
+   */
   constructor(options: GameEngineOptions) {
     const {
       sceneLoader,
       initialState = {},
-      plugins = []
+      plugins = [],
+      engineVersion = '0.1.0'
     } = options;
 
+    this.engineVersion = engineVersion;
     this.eventEmitter = new EventEmitter();
     this.stateManager = new StateManager(initialState);
     this.loaderRegistry = new LoaderRegistry();
-
-    // Registrace scén loaderu
-    this.loaderRegistry.registerLoader('scenes', sceneLoader);
-
-    // Inicializace scene manager s loaderem scén
-    this.sceneManager = new SceneManager(sceneLoader);
     this.effectManager = new EffectManager();
     this.pluginManager = new PluginManager(this);
 
+    // Registrace loaderu scén
+    this.loaderRegistry.registerLoader('scenes', sceneLoader);
+
+    // Inicializace scene manageru
+    this.sceneManager = new SceneManager(sceneLoader);
+
+    // Inicializace save manageru
+    if (options.saveManager) {
+      this.saveManager = options.saveManager;
+    } else {
+      this.saveManager = new SaveManager(this, { engineVersion });
+    }
+
     // Inicializace pluginů
+    this.initializePlugins(plugins);
+  }
+
+  /**
+   * Initializes plugins
+   *
+   * @param plugins Array of plugins to initialize
+   * @private
+   */
+  private initializePlugins(plugins: Plugin[]): void {
     plugins.forEach(plugin => this.registerPlugin(plugin));
   }
 
-
+  /**
+   * Starts the game at the specified scene
+   *
+   * @param initialSceneKey Key of the scene to start at
+   * @returns Promise that resolves when the game is started
+   */
   public async start(initialSceneKey: SceneKey): Promise<void> {
     const success = await this.sceneManager.transitionToScene(
         initialSceneKey,
@@ -106,6 +152,12 @@ export class GameEngine {
     return this.isRunning;
   }
 
+  /**
+   * Selects a choice in the current scene
+   *
+   * @param choiceIndex Index of the choice to select
+   * @returns Promise that resolves when the choice is processed
+   */
   public async selectChoice(choiceIndex: number): Promise<void> {
     const currentScene = this.sceneManager.getCurrentScene();
     if (!currentScene) return;
@@ -116,40 +168,82 @@ export class GameEngine {
       return;
     }
 
-    // Kontrola podmínky volby
-    const currentState = this.stateManager.getState();
-    if (choice.condition && !choice.condition(currentState)) {
+    if (!this.isChoiceAvailable(choice)) {
       console.warn(`Choice with index ${choiceIndex} is not available.`);
       return;
     }
 
     this.eventEmitter.emit('choiceSelected', { choice });
+    await this.processChoice(choice);
+  }
 
+  /**
+   * Checks if a choice is available based on its condition
+   *
+   * @param choice The choice to check
+   * @returns true if the choice is available, false otherwise
+   * @private
+   */
+  private isChoiceAvailable(choice: Choice): boolean {
+    if (!choice.condition) return true;
+    return choice.condition(this.stateManager.getState());
+  }
+
+  /**
+   * Processes a choice by applying its effects and transitioning to the next scene if specified
+   *
+   * @param choice The choice to process
+   * @returns Promise that resolves when the choice is processed
+   * @private
+   */
+  private async processChoice(choice: Choice): Promise<void> {
     // Aplikace efektů volby
     if (choice.effects && choice.effects.length > 0) {
-      const newState = this.effectManager.applyEffects(choice.effects, currentState);
-      this.stateManager.setState(newState);
-      this.eventEmitter.emit('stateChanged', this.stateManager.getState());
+      this.applyChoiceEffects(choice.effects);
     }
 
     // Přechod na další scénu, pokud je specifikována
     if (choice.scene) {
-      let nextSceneKey: string;
-      if (typeof choice.scene === 'function') {
-        nextSceneKey = choice.scene(this.stateManager.getState());
-      } else {
-        nextSceneKey = choice.scene;
-      }
+      await this.transitionToNextScene(choice);
+    }
+  }
 
-      const success = await this.sceneManager.transitionToScene(
-          nextSceneKey,
-          this.stateManager.getState(),
-          this
-      );
+  /**
+   * Applies effects of a choice to the game state
+   *
+   * @param effects Array of effects to apply
+   * @private
+   */
+  private applyChoiceEffects(effects: Effect[]): void {
+    const currentState = this.stateManager.getState();
+    const newState = this.effectManager.applyEffects(effects, currentState);
+    this.stateManager.setState(newState);
+    this.eventEmitter.emit('stateChanged', this.stateManager.getState());
+  }
 
-      if (success) {
-        this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
-      }
+  /**
+   * Transitions to the next scene based on a choice
+   *
+   * @param choice The choice containing the scene to transition to
+   * @returns Promise that resolves when the transition is complete
+   * @private
+   */
+  private async transitionToNextScene(choice: Choice): Promise<void> {
+    let nextSceneKey: string;
+    if (typeof choice.scene === 'function') {
+      nextSceneKey = choice.scene(this.stateManager.getState());
+    } else {
+      nextSceneKey = choice.scene as string;
+    }
+
+    const success = await this.sceneManager.transitionToScene(
+        nextSceneKey,
+        this.stateManager.getState(),
+        this
+    );
+
+    if (success) {
+      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
     }
   }
 
@@ -234,6 +328,15 @@ export class GameEngine {
    */
   public getCurrentScene(): Scene | null {
     return this.sceneManager.getCurrentScene();
+  }
+
+  /**
+   * Returns the key of the current scene
+   *
+   * @returns The current scene key or null if no scene is active
+   */
+  public getCurrentSceneKey(): SceneKey | null {
+    return this.sceneManager.getCurrentSceneKey();
   }
 
   /**
@@ -347,7 +450,85 @@ export class GameEngine {
     return this.loaderRegistry;
   }
 
-  public getCurrentSceneKey(): SceneKey | null {
-    return this.sceneManager.getCurrentSceneKey();
+  /**
+   * Gets the save manager instance
+   *
+   * @returns Save manager
+   */
+  public getSaveManager(): SaveManager {
+    return this.saveManager;
+  }
+
+  /**
+   * Gets the engine version
+   *
+   * @returns Engine version
+   */
+  public getEngineVersion(): string {
+    return this.engineVersion;
+  }
+
+  /**
+   * Saves the current game state
+   *
+   * @param saveId ID for the save
+   * @param options Save options
+   * @returns Promise that resolves to true if save was successful
+   */
+  public async saveGame(saveId: string, options: SaveOptions = {}): Promise<boolean> {
+    return await this.saveManager.save(saveId, options);
+  }
+
+  /**
+   * Loads a saved game
+   *
+   * @param saveId ID of the save to load
+   * @returns Promise that resolves to true if load was successful
+   */
+  public async loadGame(saveId: string): Promise<boolean> {
+    return await this.saveManager.load(saveId);
+  }
+
+  /**
+   * Gets a list of all saved games
+   *
+   * @returns Promise that resolves to an object mapping save IDs to metadata
+   */
+  public async getSavedGames(): Promise<Record<string, SaveMetadata>> {
+    return await this.saveManager.getSaves();
+  }
+
+  /**
+   * Performs a quick save
+   *
+   * @returns Promise that resolves to true if save was successful
+   */
+  public async quickSave(): Promise<boolean> {
+    return await this.saveManager.quickSave();
+  }
+
+  /**
+   * Performs a quick load
+   *
+   * @returns Promise that resolves to true if load was successful
+   */
+  public async quickLoad(): Promise<boolean> {
+    return await this.saveManager.quickLoad();
+  }
+
+  /**
+   * Enables auto saving
+   *
+   * @param options Auto save options
+   */
+  public enableAutoSave(options: AutoSaveOptions = {}): void {
+    this.saveManager.enableAutoSave(options);
+  }
+
+  /**
+   * Disables auto saving
+   */
+  public disableAutoSave(): void {
+    this.saveManager.disableAutoSave();
   }
 }

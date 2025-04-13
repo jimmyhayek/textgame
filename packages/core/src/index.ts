@@ -13,3 +13,6 @@ export * from './loaders';
 
 // Exportujeme pluginy
 export * from './plugins';
+
+// Exportujeme save modul
+export * from './save';

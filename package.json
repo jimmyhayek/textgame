@@ -1,5 +1,5 @@
 {
-  "name": "textgame-js",
+  "name": "pabitel",
   "private": true,
   "workspaces": [
     "packages/*",

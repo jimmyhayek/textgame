@@ -18,9 +18,8 @@ import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
 import { EffectManager } from './EffectManager';
 import { PluginManager } from './PluginManager';
-import { GenericContentLoader } from '../loaders/GenericContentLoader';
-import { LoaderRegistry } from '../loaders/LoaderRegistry';
-import { SaveManager } from '../save/SaveManager';
+import { GenericContentLoader } from '../loaders';
+import { SaveManager } from '../save';
 
 export interface GameEngineOptions {
   /** Loader scén pro načítání herního obsahu */

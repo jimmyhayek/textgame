@@ -12,6 +12,9 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node"
   },
+  "paths": {
+    "@pabitel/core": ["../core/src"]
+  },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "examples"]
 }

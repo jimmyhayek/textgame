@@ -11,18 +11,6 @@ import Fuse from 'fuse.js';
 export class CommandPlugin extends AbstractPlugin<CommandPluginOptions> {
 
     /**
-     * Reference na herní engine
-     * Musíme deklarovat explicitně, i když je zdědená z AbstractPlugin
-     */
-    protected engine: GameEngine | null = null;
-
-    /**
-     * Nastavení pluginu
-     * Musíme deklarovat explicitně, i když je zdědená z AbstractPlugin
-     */
-    protected options: CommandPluginOptions;
-
-    /**
      * Instance Fuse.js pro vyhledávání
      */
     private fuse: Fuse<{ command: Command; pattern: string }> | null = null;

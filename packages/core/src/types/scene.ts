@@ -1,3 +1,5 @@
+// packages/core/src/types/scene.ts
+
 import { GameState } from './state';
 import { Effect } from './effect';
 
@@ -11,9 +13,14 @@ export type SceneKey = string;
  */
 export interface Choice {
   /**
-   * Obsah volby zobrazený hráči, může být statický nebo dynamický
+   * Text volby zobrazený v UI
    */
-  content: string | ((state: GameState) => string);
+  label: string | ((state: GameState) => string);
+
+  /**
+   * Volitelná klávesová zkratka pro rychlý výběr volby
+   */
+  shortcut?: string;
 
   /**
    * Volitelný klíč scény, na kterou se přejde po výběru této volby
@@ -30,6 +37,11 @@ export interface Choice {
    * Efekty, které se aplikují na stav hry po výběru této volby
    */
   effects?: Effect[];
+
+  /**
+   * Textová odpověď po výběru volby, může být statická nebo dynamická
+   */
+  response?: string | ((state: GameState) => string);
 
   /**
    * Další metadata pro rozšíření funkcionality

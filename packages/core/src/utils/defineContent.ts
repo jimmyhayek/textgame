@@ -1,3 +1,5 @@
+// packages/core/src/utils/defineContent.ts - aktualizace příkladů a dokumentace
+
 import { ContentDefinition, ContentRegistry } from '../types';
 import { Scene, SceneKey } from '../types/scene';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';

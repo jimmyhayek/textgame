@@ -116,6 +116,33 @@ export class SceneManager {
   }
 
   /**
+   * Získá text volby ze statického textu nebo dynamické funkce
+   *
+   * @param choice Volba, pro kterou se získá text
+   * @param state Aktuální herní stav
+   * @returns Text volby
+   */
+  public getChoiceLabel(choice: Choice, state: GameState): string {
+    if (typeof choice.label === 'function') {
+      return choice.label(state);
+    }
+    return choice.label;
+  }
+
+  /**
+   * Získá volbu podle její klávesové zkratky
+   *
+   * @param shortcut Klávesová zkratka
+   * @param state Aktuální herní stav pro filtrování podle podmínek
+   * @returns Nalezená volba nebo undefined, pokud žádná neodpovídá
+   */
+  public getChoiceByShortcut(shortcut: string, state: GameState): Choice | undefined {
+    if (!this.currentScene) return undefined;
+
+    return this.getAvailableChoices(state).find(choice => choice.shortcut === shortcut);
+  }
+
+  /**
    * Předem načte scény podle klíčů
    *
    * @param sceneKeys Volitelné pole klíčů scén k načtení, načte všechny scény pokud neuvedeno

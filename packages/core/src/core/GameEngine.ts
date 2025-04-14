@@ -153,6 +153,60 @@ export class GameEngine {
   }
 
   /**
+   * Checks if a choice is available based on its condition
+   *
+   * @param choice The choice to check
+   * @returns true if the choice is available, false otherwise
+   * @private
+   */
+  private isChoiceAvailable(choice: Choice): boolean {
+    if (!choice.condition) return true;
+    return choice.condition(this.stateManager.getState());
+  }
+
+  /**
+   * Processes a choice by applying its effects, showing response, and transitioning to the next scene if specified
+   *
+   * @param choice The choice to process
+   * @returns Promise that resolves when the choice is processed
+   * @private
+   */
+  private async processChoice(choice: Choice): Promise<void> {
+    // Aplikace efektů volby
+    if (choice.effects && choice.effects.length > 0) {
+      this.applyChoiceEffects(choice.effects);
+    }
+
+    // Zpracování textové odpovědi, pokud existuje
+    if (choice.response) {
+      const response = typeof choice.response === 'function'
+          ? choice.response(this.stateManager.getState())
+          : choice.response;
+
+      // Emitujeme událost s odpovědí - UI může na to reagovat
+      this.eventEmitter.emit('choiceResponse', { response });
+    }
+
+    // Přechod na další scénu, pokud je specifikována
+    if (choice.scene) {
+      await this.transitionToNextScene(choice);
+    }
+  }
+
+  /**
+   * Gets the label for a choice, resolving dynamic labels
+   *
+   * @param choice The choice to get the label for
+   * @returns The resolved label text
+   */
+  public getChoiceLabel(choice: Choice): string {
+    if (typeof choice.label === 'function') {
+      return choice.label(this.stateManager.getState());
+    }
+    return choice.label;
+  }
+
+  /**
    * Selects a choice in the current scene
    *
    * @param choiceIndex Index of the choice to select
@@ -178,34 +232,21 @@ export class GameEngine {
   }
 
   /**
-   * Checks if a choice is available based on its condition
+   * Selects a choice by its shortcut
    *
-   * @param choice The choice to check
-   * @returns true if the choice is available, false otherwise
-   * @private
+   * @param shortcut The shortcut key to select
+   * @returns Promise that resolves when the choice is processed, or false if no matching shortcut is found
    */
-  private isChoiceAvailable(choice: Choice): boolean {
-    if (!choice.condition) return true;
-    return choice.condition(this.stateManager.getState());
-  }
+  public async selectChoiceByShortcut(shortcut: string): Promise<boolean> {
+    const choices = this.getAvailableChoices();
+    const choiceIndex = choices.findIndex(choice => choice.shortcut === shortcut);
 
-  /**
-   * Processes a choice by applying its effects and transitioning to the next scene if specified
-   *
-   * @param choice The choice to process
-   * @returns Promise that resolves when the choice is processed
-   * @private
-   */
-  private async processChoice(choice: Choice): Promise<void> {
-    // Aplikace efektů volby
-    if (choice.effects && choice.effects.length > 0) {
-      this.applyChoiceEffects(choice.effects);
+    if (choiceIndex === -1) {
+      return false;
     }
 
-    // Přechod na další scénu, pokud je specifikována
-    if (choice.scene) {
-      await this.transitionToNextScene(choice);
-    }
+    await this.selectChoice(choiceIndex);
+    return true;
   }
 
   /**

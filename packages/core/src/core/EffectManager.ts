@@ -11,20 +11,67 @@ import {
 } from '../types';
 import { produce } from '../utils/immer';
 
+// Konstanta pro oddělení jmenného prostoru
+const NAMESPACE_SEPARATOR = ':';
+
+/**
+ * Manažer efektů pro zpracování herních efektů
+ */
 export class EffectManager {
   private effectProcessors: Map<string, EffectProcessor> = new Map();
   private fallbackProcessor: EffectProcessor | null = null;
 
-  constructor() {
-    this.registerDefaultEffects();
+  /**
+   * Vytvoří novou instanci EffectManager
+   *
+   * @param options Možnosti konfigurace
+   */
+  constructor(options: { registerDefaultEffects?: boolean } = {}) {
+    const { registerDefaultEffects = true } = options;
+
+    if (registerDefaultEffects) {
+      this.registerDefaultEffects();
+    }
   }
 
-  private getValueByPath(obj: any, path: string): any {
+  /**
+   * Zpracuje jeden efekt s využitím příslušného procesoru
+   *
+   * @param effect Efekt ke zpracování
+   * @param draftState Návrh herního stavu pro modifikaci
+   */
+  private processSingleEffect(effect: Effect, draftState: GameState): void {
+    const processor = this.effectProcessors.get(effect.type);
+
+    if (processor) {
+      processor(effect, draftState);
+    } else if (this.fallbackProcessor) {
+      this.fallbackProcessor(effect, draftState);
+    } else {
+      console.warn(`No processor registered for effect type '${effect.type}'`);
+    }
+  }
+
+  /**
+   * Získá hodnotu podle cesty v objektu
+   *
+   * @param obj Objekt, ve kterém hledáme
+   * @param path Cesta k hodnotě (formát: 'prop1.prop2.prop3')
+   * @returns Nalezená hodnota nebo undefined
+   */
+  private getValueByPath<T>(obj: Record<string, any>, path: string): T | undefined {
     return path.split('.').reduce((current, part) =>
-        current && typeof current === 'object' ? current[part] : undefined, obj);
+        current && typeof current === 'object' ? current[part] : undefined, obj) as T | undefined;
   }
 
-  private setValueByPath(obj: any, path: string, value: any): void {
+  /**
+   * Nastaví hodnotu podle cesty v objektu
+   *
+   * @param obj Objekt, který modifikujeme
+   * @param path Cesta k hodnotě (formát: 'prop1.prop2.prop3')
+   * @param value Hodnota k nastavení
+   */
+  private setValueByPath(obj: Record<string, any>, path: string, value: any): void {
     const parts = path.split('.');
     const last = parts.pop()!;
     const target = parts.reduce((current, part) => {
@@ -37,6 +84,9 @@ export class EffectManager {
     target[last] = value;
   }
 
+  /**
+   * Registruje výchozí efektové procesory
+   */
   private registerDefaultEffects(): void {
     // Základní operace s proměnnými
     this.registerEffectProcessor(BuiltInEffectType.set, (effect, draftState) => {
@@ -53,7 +103,7 @@ export class EffectManager {
       const { variable, value = 1, path } = effect;
 
       if (path) {
-        const currentValue = this.getValueByPath(draftState, path);
+        const currentValue = this.getValueByPath<number>(draftState, path);
         const newValue = typeof currentValue !== 'number' ? value : currentValue + value;
         this.setValueByPath(draftState, path, newValue);
       } else {
@@ -68,7 +118,7 @@ export class EffectManager {
       const { variable, value = 1, path } = effect;
 
       if (path) {
-        const currentValue = this.getValueByPath(draftState, path);
+        const currentValue = this.getValueByPath<number>(draftState, path);
         const newValue = typeof currentValue !== 'number' ? -value : currentValue - value;
         this.setValueByPath(draftState, path, newValue);
       } else {
@@ -83,7 +133,7 @@ export class EffectManager {
       const { variable, value, path } = effect;
 
       if (path) {
-        const currentValue = this.getValueByPath(draftState, path);
+        const currentValue = this.getValueByPath<number>(draftState, path);
         const newValue = typeof currentValue !== 'number' ? 0 : currentValue * value;
         this.setValueByPath(draftState, path, newValue);
       } else {
@@ -98,12 +148,11 @@ export class EffectManager {
       const { variable, value, path } = effect;
 
       if (value === 0) {
-        console.warn('Cannot divide by zero. Skipping effect.');
-        return;
+        throw new Error('Cannot divide by zero');
       }
 
       if (path) {
-        const currentValue = this.getValueByPath(draftState, path);
+        const currentValue = this.getValueByPath<number>(draftState, path);
         const newValue = typeof currentValue !== 'number' ? 0 : currentValue / value;
         this.setValueByPath(draftState, path, newValue);
       } else {
@@ -118,7 +167,7 @@ export class EffectManager {
       const { variable, path } = effect;
 
       if (path) {
-        const currentValue = this.getValueByPath(draftState, path);
+        const currentValue = this.getValueByPath<boolean>(draftState, path);
         this.setValueByPath(draftState, path, !currentValue);
       } else {
         draftState.variables[variable] = !draftState.variables[variable];
@@ -130,7 +179,7 @@ export class EffectManager {
       const { array, value, path } = effect;
 
       if (path) {
-        const currentArray = this.getValueByPath(draftState, path);
+        const currentArray = this.getValueByPath<any[]>(draftState, path);
         if (!Array.isArray(currentArray)) {
           this.setValueByPath(draftState, path, [value]);
         } else {
@@ -147,32 +196,34 @@ export class EffectManager {
     this.registerEffectProcessor(BuiltInEffectType.remove, (effect, draftState) => {
       const { array, value, byIndex = false, path } = effect;
 
-      if (path) {
-        const currentArray = this.getValueByPath(draftState, path);
-        if (!Array.isArray(currentArray)) return;
-
-        if (byIndex) {
-          if (value >= 0 && value < currentArray.length) {
-            currentArray.splice(value, 1);
+      const removeByIndexOrValue = (arr: any[], val: any, useIndex: boolean) => {
+        if (useIndex) {
+          if (val >= 0 && val < arr.length) {
+            arr.splice(val, 1);
+          }
+        } else if (typeof val === 'object') {
+          // Pro objektové hodnoty hledáme podle equality funkce, pokud je poskytnuta
+          const equalityFn = effect.equalityFn || ((a: any, b: any) => a === b);
+          const index = arr.findIndex(item => equalityFn(item, val));
+          if (index !== -1) {
+            arr.splice(index, 1);
           }
         } else {
-          const index = currentArray.indexOf(value);
+          const index = arr.indexOf(val);
           if (index !== -1) {
-            currentArray.splice(index, 1);
+            arr.splice(index, 1);
           }
         }
-      } else {
-        if (!Array.isArray(draftState.variables[array])) return;
+      };
 
-        if (byIndex) {
-          if (value >= 0 && value < draftState.variables[array].length) {
-            draftState.variables[array].splice(value, 1);
-          }
-        } else {
-          const index = draftState.variables[array].indexOf(value);
-          if (index !== -1) {
-            draftState.variables[array].splice(index, 1);
-          }
+      if (path) {
+        const currentArray = this.getValueByPath<any[]>(draftState, path);
+        if (Array.isArray(currentArray)) {
+          removeByIndexOrValue(currentArray, value, byIndex);
+        }
+      } else {
+        if (Array.isArray(draftState.variables[array])) {
+          removeByIndexOrValue(draftState.variables[array], value, byIndex);
         }
       }
     });
@@ -182,19 +233,11 @@ export class EffectManager {
       const batchEffect = effect as BatchEffect;
 
       if (!batchEffect.effects || !Array.isArray(batchEffect.effects)) {
-        console.warn('Batch effect requires an array of effects');
-        return;
+        throw new Error('Batch effect requires an array of effects');
       }
 
       for (const subEffect of batchEffect.effects) {
-        const processor = this.effectProcessors.get(subEffect.type);
-        if (processor) {
-          processor(subEffect, draftState);
-        } else if (this.fallbackProcessor) {
-          this.fallbackProcessor(subEffect, draftState);
-        } else {
-          console.warn(`No processor registered for effect type '${subEffect.type}'`);
-        }
+        this.processSingleEffect(subEffect, draftState);
       }
     });
 
@@ -202,20 +245,11 @@ export class EffectManager {
       const sequenceEffect = effect as SequenceEffect;
 
       if (!sequenceEffect.effects || !Array.isArray(sequenceEffect.effects)) {
-        console.warn('Sequence effect requires an array of effects');
-        return;
+        throw new Error('Sequence effect requires an array of effects');
       }
 
-      // V immer produceStep již máme draftState, proto nemusíme volat produce znovu
       for (const subEffect of sequenceEffect.effects) {
-        const processor = this.effectProcessors.get(subEffect.type);
-        if (processor) {
-          processor(subEffect, draftState);
-        } else if (this.fallbackProcessor) {
-          this.fallbackProcessor(subEffect, draftState);
-        } else {
-          console.warn(`No processor registered for effect type '${subEffect.type}'`);
-        }
+        this.processSingleEffect(subEffect, draftState);
       }
     });
 
@@ -223,42 +257,26 @@ export class EffectManager {
       const conditionalEffect = effect as ConditionalEffect;
 
       if (!conditionalEffect.condition || typeof conditionalEffect.condition !== 'function') {
-        console.warn('Conditional effect requires a condition function');
-        return;
+        throw new Error('Conditional effect requires a condition function');
       }
 
       if (!conditionalEffect.thenEffects || !Array.isArray(conditionalEffect.thenEffects)) {
-        console.warn('Conditional effect requires thenEffects array');
-        return;
+        throw new Error('Conditional effect requires thenEffects array');
       }
 
-      // Vytvoříme kopii stavu pro vyhodnocení podmínky
-      // Nemůžeme použít přímo draftState pro vyhodnocení, protože je to Proxy
-      const stateForCondition = JSON.parse(JSON.stringify(draftState));
+      // Pro vyhodnocení podmínky použijeme immutable kopii stavu
+      const immutableState = produce(draftState, () => {});
+      const conditionResult = conditionalEffect.condition(immutableState);
 
-      if (conditionalEffect.condition(stateForCondition)) {
+      if (conditionResult) {
         // Aplikujeme 'then' efekty
         for (const subEffect of conditionalEffect.thenEffects) {
-          const processor = this.effectProcessors.get(subEffect.type);
-          if (processor) {
-            processor(subEffect, draftState);
-          } else if (this.fallbackProcessor) {
-            this.fallbackProcessor(subEffect, draftState);
-          } else {
-            console.warn(`No processor registered for effect type '${subEffect.type}'`);
-          }
+          this.processSingleEffect(subEffect, draftState);
         }
       } else if (conditionalEffect.elseEffects && Array.isArray(conditionalEffect.elseEffects)) {
         // Aplikujeme 'else' efekty, pokud existují
         for (const subEffect of conditionalEffect.elseEffects) {
-          const processor = this.effectProcessors.get(subEffect.type);
-          if (processor) {
-            processor(subEffect, draftState);
-          } else if (this.fallbackProcessor) {
-            this.fallbackProcessor(subEffect, draftState);
-          } else {
-            console.warn(`No processor registered for effect type '${subEffect.type}'`);
-          }
+          this.processSingleEffect(subEffect, draftState);
         }
       }
     });
@@ -267,63 +285,96 @@ export class EffectManager {
       const repeatEffect = effect as RepeatEffect;
 
       if (!repeatEffect.effect) {
-        console.warn('Repeat effect requires an effect to repeat');
-        return;
+        throw new Error('Repeat effect requires an effect to repeat');
       }
 
       let count: number;
 
       if (typeof repeatEffect.count === 'function') {
-        // Vytvoříme kopii stavu pro vyhodnocení počtu opakování
-        const stateForCount = JSON.parse(JSON.stringify(draftState));
-        count = repeatEffect.count(stateForCount);
+        // Pro vyhodnocení počtu opakování použijeme immutable kopii stavu
+        const immutableState = produce(draftState, () => {});
+        count = repeatEffect.count(immutableState);
       } else {
         count = repeatEffect.count;
       }
 
       if (!Number.isInteger(count) || count < 0) {
-        console.warn('Repeat count must be a non-negative integer');
-        return;
+        throw new Error('Repeat count must be a non-negative integer');
       }
 
-      const processor = this.effectProcessors.get(repeatEffect.effect.type);
-
       for (let i = 0; i < count; i++) {
-        if (processor) {
-          processor(repeatEffect.effect, draftState);
-        } else if (this.fallbackProcessor) {
-          this.fallbackProcessor(repeatEffect.effect, draftState);
-        } else {
-          console.warn(`No processor registered for effect type '${repeatEffect.effect.type}'`);
-        }
+        this.processSingleEffect(repeatEffect.effect, draftState);
       }
     });
   }
 
-  public registerEffectProcessor(effectType: EffectType, processor: EffectProcessor, namespace?: string): void {
-    const namespacePrefix = namespace ? `${namespace}:` : '';
-    this.effectProcessors.set(`${namespacePrefix}${effectType}`, processor);
+  /**
+   * Odregistruje výchozí efektové procesory
+   */
+  public unregisterDefaultEffects(): void {
+    Object.values(BuiltInEffectType).forEach(type => {
+      this.effectProcessors.delete(type);
+    });
   }
 
-  public unregisterEffectProcessor(effectType: EffectType, namespace?: string): boolean {
-    const namespacePrefix = namespace ? `${namespace}:` : '';
-    const fullType = `${namespacePrefix}${effectType}`;
-
-    if (this.effectProcessors.has(fullType)) {
-      this.effectProcessors.delete(fullType);
-      return true;
+  /**
+   * Sestaví kompletní klíč procesoru včetně jmenného prostoru
+   *
+   * @param effectType Typ efektu
+   * @param namespace Jmenný prostor (volitelný)
+   * @returns Kompletní klíč procesoru
+   */
+  private getFullEffectType(effectType: EffectType, namespace?: string): string {
+    if (!namespace) {
+      return effectType.toString();
     }
-    return false;
+    return `${namespace}${NAMESPACE_SEPARATOR}${effectType}`;
   }
 
+  /**
+   * Registruje procesor pro daný typ efektu
+   *
+   * @param effectType Typ efektu
+   * @param processor Funkce pro zpracování efektu
+   * @param namespace Jmenný prostor (volitelný)
+   */
+  public registerEffectProcessor(effectType: EffectType, processor: EffectProcessor, namespace?: string): void {
+    const fullType = this.getFullEffectType(effectType, namespace);
+    this.effectProcessors.set(fullType, processor);
+  }
+
+  /**
+   * Odregistruje procesor pro daný typ efektu
+   *
+   * @param effectType Typ efektu
+   * @param namespace Jmenný prostor (volitelný)
+   * @returns True pokud byl procesor úspěšně odregistrován
+   */
+  public unregisterEffectProcessor(effectType: EffectType, namespace?: string): boolean {
+    const fullType = this.getFullEffectType(effectType, namespace);
+    return this.effectProcessors.delete(fullType);
+  }
+
+  /**
+   * Registruje více procesorů najednou
+   *
+   * @param processors Objekt mapující typy efektů na procesory
+   * @param namespace Jmenný prostor (volitelný)
+   */
   public registerEffectProcessors(processors: Record<string, EffectProcessor>, namespace?: string): void {
     for (const [type, processor] of Object.entries(processors)) {
       this.registerEffectProcessor(type as EffectType, processor, namespace);
     }
   }
 
+  /**
+   * Odregistruje všechny procesory patřící pod daný jmenný prostor
+   *
+   * @param namespace Jmenný prostor
+   * @returns Počet odregistrovaných procesorů
+   */
   public unregisterNamespace(namespace: string): number {
-    const prefix = `${namespace}:`;
+    const prefix = `${namespace}${NAMESPACE_SEPARATOR}`;
     let count = 0;
 
     for (const key of this.effectProcessors.keys()) {
@@ -336,27 +387,35 @@ export class EffectManager {
     return count;
   }
 
+  /**
+   * Nastaví záložní procesor pro neznámé typy efektů
+   *
+   * @param processor Záložní procesor nebo null pro deaktivaci
+   */
   public setFallbackProcessor(processor: EffectProcessor | null): void {
     this.fallbackProcessor = processor;
   }
 
+  /**
+   * Aplikuje efekt na herní stav
+   *
+   * @param effect Efekt k aplikaci
+   * @param state Herní stav
+   * @returns Nový herní stav
+   */
   public applyEffect(effect: Effect, state: GameState): GameState {
-    const processor = this.effectProcessors.get(effect.type);
-
-    if (processor) {
-      return produce(state, (draftState: GameState) => {
-        processor(effect, draftState);
-      });
-    } else if (this.fallbackProcessor) {
-      return produce(state, (draftState: GameState) => {
-        this.fallbackProcessor!(effect, draftState);
-      });
-    } else {
-      console.warn(`No processor registered for effect type '${effect.type}'`);
-      return state;
-    }
+    return produce(state, (draftState: GameState) => {
+      this.processSingleEffect(effect, draftState);
+    });
   }
 
+  /**
+   * Aplikuje více efektů na herní stav
+   *
+   * @param effects Pole efektů k aplikaci
+   * @param state Herní stav
+   * @returns Nový herní stav
+   */
   public applyEffects(effects: Effect[], state: GameState): GameState {
     if (effects.length === 0) {
       return state;
@@ -364,23 +423,28 @@ export class EffectManager {
 
     return produce(state, (draftState: GameState) => {
       for (const effect of effects) {
-        const processor = this.effectProcessors.get(effect.type);
-        if (processor) {
-          processor(effect, draftState);
-        } else if (this.fallbackProcessor) {
-          this.fallbackProcessor(effect, draftState);
-        } else {
-          console.warn(`No processor registered for effect type '${effect.type}'`);
-        }
+        this.processSingleEffect(effect, draftState);
       }
     });
   }
 
+  /**
+   * Zkontroluje, zda existuje procesor pro daný typ efektu
+   *
+   * @param effectType Typ efektu
+   * @param namespace Jmenný prostor (volitelný)
+   * @returns True pokud procesor existuje
+   */
   public hasProcessor(effectType: EffectType, namespace?: string): boolean {
-    const namespacePrefix = namespace ? `${namespace}.` : '';
-    return this.effectProcessors.has(`${namespacePrefix}${effectType}`);
+    const fullType = this.getFullEffectType(effectType, namespace);
+    return this.effectProcessors.has(fullType);
   }
 
+  /**
+   * Vrátí seznam registrovaných typů efektů
+   *
+   * @returns Pole typů efektů
+   */
   public getRegisteredEffectTypes(): string[] {
     return Array.from(this.effectProcessors.keys());
   }

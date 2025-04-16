@@ -1,7 +1,7 @@
 // src/core/PluginManager.ts
 
-import { Plugin } from '../types';
-import { GameEngine } from './GameEngine';
+import { Types } from '../types';
+import { GameEngine } from '../core/GameEngine';
 
 /**
  * Správce pluginů pro herní engine
@@ -14,7 +14,7 @@ export class PluginManager {
   private engine: GameEngine;
 
   /** Mapa registrovaných pluginů podle názvu */
-  private plugins: Map<string, Plugin> = new Map();
+  private plugins: Map<string, Types> = new Map();
 
   /**
    * Vytvoří novou instanci PluginManager
@@ -31,7 +31,7 @@ export class PluginManager {
    * @param plugin Plugin k registraci
    * @returns True pokud byl plugin úspěšně registrován, false pokud plugin se stejným názvem již existuje
    */
-  public registerPlugin(plugin: Plugin): boolean {
+  public registerPlugin(plugin: Types): boolean {
     if (this.plugins.has(plugin.name)) {
       console.warn(`Plugin with name '${plugin.name}' is already registered.`);
       return false;
@@ -88,7 +88,7 @@ export class PluginManager {
    * @param pluginName Název pluginu
    * @returns Plugin daného typu nebo undefined pokud plugin nebyl nalezen
    */
-  public getPlugin<T extends Plugin = Plugin>(pluginName: string): T | undefined {
+  public getPlugin<T extends Types = Types>(pluginName: string): T | undefined {
     return this.plugins.get(pluginName) as T | undefined;
   }
 
@@ -106,7 +106,7 @@ export class PluginManager {
    *
    * @returns Pole registrovaných pluginů
    */
-  public getAllPlugins(): Plugin[] {
+  public getAllPlugins(): Types[] {
     return Array.from(this.plugins.values());
   }
 

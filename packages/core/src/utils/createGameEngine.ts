@@ -1,5 +1,5 @@
 import { GameEngine } from '../core/GameEngine';
-import { Plugin, ContentDefinition, GameState, Scene, SceneKey } from '../types';
+import { Types, ContentDefinition, GameState, Scene, SceneKey } from '../types';
 import { GenericContentLoader } from '../loaders/GenericContentLoader';
 
 /**
@@ -9,7 +9,7 @@ interface CreateGameEngineOptions {
   /** Definice obsahu k registraci */
   content?: ContentDefinition<any>[];
   /** Pluginy k registraci */
-  plugins?: Plugin[];
+  plugins?: Types[];
   /** Počáteční stav hry */
   initialState?: Partial<GameState>;
   /** Vlastní content loader pro scény */

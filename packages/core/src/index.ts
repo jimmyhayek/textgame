@@ -12,7 +12,7 @@ export * from './utils';
 export * from './loaders';
 
 // Exportujeme pluginy
-export * from './plugins';
+export * from './plugin';
 
 // Exportujeme save modul
 export * from './save';

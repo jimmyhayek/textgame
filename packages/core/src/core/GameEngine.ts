@@ -5,7 +5,7 @@ import {
   Choice,
   Scene,
   Effect,
-  Plugin,
+  Types,
   GameEventType,
   EventListener,
   ContentDefinition,
@@ -23,7 +23,7 @@ import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
 import { EffectManager } from './EffectManager';
-import { PluginManager } from './PluginManager';
+import { PluginManager } from '../plugin/PluginManager';
 import { GenericContentLoader } from '../loaders';
 import { SaveManager } from '../save';
 import { EntityManager } from './EntityManager';
@@ -37,7 +37,7 @@ export interface GameEngineOptions {
   initialState?: Partial<GameState>;
 
   /** Pluginy, které budou registrovány s enginem */
-  plugins?: Plugin[];
+  plugins?: Types[];
 
   /** SaveManager pro ukládání a načítání her (volitelné) */
   saveManager?: SaveManager;
@@ -131,7 +131,7 @@ export class GameEngine {
    * @param plugins Array of plugins to initialize
    * @private
    */
-  private initializePlugins(plugins: Plugin[]): void {
+  private initializePlugins(plugins: Types[]): void {
     plugins.forEach(plugin => this.registerPlugin(plugin));
   }
 
@@ -411,7 +411,7 @@ export class GameEngine {
    *
    * @param plugin Plugin to register
    */
-  public registerPlugin(plugin: Plugin): void {
+  public registerPlugin(plugin: Types): void {
     this.pluginManager.registerPlugin(plugin);
   }
 
@@ -431,7 +431,7 @@ export class GameEngine {
    * @param pluginName Name of the plugin to retrieve
    * @returns Plugin of the requested type or undefined if not found
    */
-  public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
+  public getPlugin<T extends Types>(pluginName: string): T | undefined {
     return this.pluginManager.getPlugin<T>(pluginName);
   }
 

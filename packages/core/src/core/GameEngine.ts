@@ -1,3 +1,5 @@
+// src/core/GameEngine.ts
+
 import {
   GameState,
   Choice,
@@ -11,7 +13,11 @@ import {
   SceneKey,
   SaveMetadata,
   SaveOptions,
-  AutoSaveOptions
+  AutoSaveOptions,
+  Entity,
+  EntityId,
+  EntityType,
+  EntityQuery
 } from '../types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
@@ -20,6 +26,8 @@ import { EffectManager } from './EffectManager';
 import { PluginManager } from './PluginManager';
 import { GenericContentLoader } from '../loaders';
 import { SaveManager } from '../save';
+import { EntityManager } from './EntityManager';
+import { LoaderRegistry } from '../loaders/LoaderRegistry';
 
 export interface GameEngineOptions {
   /** Loader scén pro načítání herního obsahu */
@@ -67,6 +75,9 @@ export class GameEngine {
   /** Save manager for saving and loading games */
   private readonly saveManager: SaveManager;
 
+  /** Entity manager for managing game entities */
+  private readonly entityManager: EntityManager;
+
   /** Engine version */
   private readonly engineVersion: string;
 
@@ -91,6 +102,10 @@ export class GameEngine {
     this.stateManager = new StateManager(initialState);
     this.loaderRegistry = new LoaderRegistry();
     this.effectManager = new EffectManager();
+
+    // Inicializace EntityManager - po stateManager a eventEmitter
+    this.entityManager = new EntityManager(this.stateManager, this.eventEmitter);
+
     this.pluginManager = new PluginManager(this);
 
     // Registrace loaderu scén
@@ -500,6 +515,15 @@ export class GameEngine {
   }
 
   /**
+   * Gets the entity manager instance
+   *
+   * @returns Entity manager
+   */
+  public getEntityManager(): EntityManager {
+    return this.entityManager;
+  }
+
+  /**
    * Gets the engine version
    *
    * @returns Engine version
@@ -570,5 +594,40 @@ export class GameEngine {
    */
   public disableAutoSave(): void {
     this.saveManager.disableAutoSave();
+  }
+
+  // -----------------------------
+  // Entity convenience methods
+  // -----------------------------
+
+  /**
+   * Creates a new entity in the game
+   *
+   * @param type Type of entity
+   * @param options Options for entity creation
+   * @returns The created entity
+   */
+  public createEntity(type: EntityType, options = {}): Entity {
+    return this.entityManager.createEntity(type, options);
+  }
+
+  /**
+   * Gets an entity by ID
+   *
+   * @param entityId ID of the entity
+   * @returns The entity or undefined if not found
+   */
+  public getEntity(entityId: EntityId): Entity | undefined {
+    return this.entityManager.getEntity(entityId);
+  }
+
+  /**
+   * Finds entities matching query criteria
+   *
+   * @param query Query criteria
+   * @returns Array of matching entities
+   */
+  public findEntities(query: EntityQuery = {}): Entity[] {
+    return this.entityManager.findEntities(query);
   }
 }

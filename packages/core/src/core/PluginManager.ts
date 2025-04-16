@@ -1,146 +1,131 @@
-import { GameEngine } from '../core/GameEngine';
+// src/core/PluginManager.ts
+
 import { Plugin } from '../types';
-import { GenericContentLoader } from '../loaders/GenericContentLoader';
-import { Effect, EffectProcessor } from '../types/effect';
+import { GameEngine } from './GameEngine';
 
-export interface PluginOptions {
-  [key: string]: any;
-}
+/**
+ * Správce pluginů pro herní engine
+ *
+ * Zodpovídá za registraci, inicializaci a správu pluginů
+ * připojených k hernímu enginu.
+ */
+export class PluginManager {
+  /** Reference na herní engine */
+  private engine: GameEngine;
 
-export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptions> implements Plugin {
-  public readonly name: string;
-  protected options: Options;
-  protected engine: GameEngine | null = null;
-  protected loaders: Map<string, GenericContentLoader<any>> = new Map();
-  protected registeredEffects: Set<string> = new Set();
+  /** Mapa registrovaných pluginů podle názvu */
+  private plugins: Map<string, Plugin> = new Map();
 
-  constructor(name: string, options: Options) {
-    this.name = name;
-    this.options = options;
-    this.setupLoaders();
-  }
-
-  protected setupLoaders(): void {
-    // Override in subclass to register specific loaders
-  }
-
-  public initialize(engine: GameEngine): void {
+  /**
+   * Vytvoří novou instanci PluginManager
+   *
+   * @param engine Reference na herní engine
+   */
+  constructor(engine: GameEngine) {
     this.engine = engine;
-
-    this.loaders.forEach((loader, type) => {
-      engine.getLoaderRegistry().registerLoader(type, loader);
-    });
-
-    this.registerContent();
-    this.registerEventHandlers();
-    this.setupEffectProcessors();
-    this.onInitialize();
   }
 
-  protected registerContent(): void {
-    // Override in subclass to register specific content
-  }
+  /**
+   * Registruje plugin v herním enginu
+   *
+   * @param plugin Plugin k registraci
+   * @returns True pokud byl plugin úspěšně registrován, false pokud plugin se stejným názvem již existuje
+   */
+  public registerPlugin(plugin: Plugin): boolean {
+    if (this.plugins.has(plugin.name)) {
+      console.warn(`Plugin with name '${plugin.name}' is already registered.`);
+      return false;
+    }
 
-  protected registerEventHandlers(): void {
-    // Override in subclass to register specific event handlers
-  }
+    this.plugins.set(plugin.name, plugin);
 
-  protected setupEffectProcessors(): void {
-    // Override in subclass to register specific effect processors
-  }
-
-  protected registerEffectProcessor(effectType: string, processor: EffectProcessor): void {
-    if (this.engine) {
-      this.engine.getEffectManager().registerEffectProcessor(effectType, processor, this.name);
-      this.registeredEffects.add(effectType);
+    // Inicializace pluginu
+    try {
+      plugin.initialize(this.engine);
+      console.log(`Plugin '${plugin.name}' successfully registered and initialized.`);
+      return true;
+    } catch (error) {
+      console.error(`Error initializing plugin '${plugin.name}':`, error);
+      this.plugins.delete(plugin.name);
+      return false;
     }
   }
 
-  protected registerEffectProcessors(processors: Record<string, EffectProcessor>): void {
-    if (this.engine) {
-      this.engine.getEffectManager().registerEffectProcessors(processors, this.name);
-      Object.keys(processors).forEach(type => this.registeredEffects.add(type));
+  /**
+   * Odregistruje plugin z herního enginu
+   *
+   * @param pluginName Název pluginu k odregistrování
+   * @returns True pokud byl plugin úspěšně odregistrován, false pokud plugin nebyl nalezen
+   */
+  public unregisterPlugin(pluginName: string): boolean {
+    const plugin = this.plugins.get(pluginName);
+
+    if (!plugin) {
+      console.warn(`Plugin with name '${pluginName}' is not registered.`);
+      return false;
+    }
+
+    // Vyčištění zdrojů pluginu
+    try {
+      if (plugin.destroy) {
+        plugin.destroy();
+      }
+
+      this.plugins.delete(pluginName);
+      console.log(`Plugin '${pluginName}' successfully unregistered.`);
+      return true;
+    } catch (error) {
+      console.error(`Error destroying plugin '${pluginName}':`, error);
+      // Plugin zůstává registrován v případě chyby
+      return false;
     }
   }
 
-  protected onInitialize(): void {
-    // Override in subclass for plugin-specific initialization
+  /**
+   * Získá plugin podle názvu
+   *
+   * @template T Typ očekávaného pluginu
+   * @param pluginName Název pluginu
+   * @returns Plugin daného typu nebo undefined pokud plugin nebyl nalezen
+   */
+  public getPlugin<T extends Plugin = Plugin>(pluginName: string): T | undefined {
+    return this.plugins.get(pluginName) as T | undefined;
   }
 
-  public destroy(): void {
-    if (this.engine) {
-      this.unregisterEventHandlers();
-      this.unregisterEffectProcessors();
-      this.onDestroy();
-
-      this.loaders.forEach((_, type) => {
-        this.engine?.getLoaderRegistry().removeLoader(type);
-      });
-
-      this.engine = null;
-    }
+  /**
+   * Vrátí názvy všech registrovaných pluginů
+   *
+   * @returns Pole názvů registrovaných pluginů
+   */
+  public getPluginNames(): string[] {
+    return Array.from(this.plugins.keys());
   }
 
-  protected unregisterEventHandlers(): void {
-    // Override in subclass to unregister specific event handlers
+  /**
+   * Vrátí všechny registrované pluginy
+   *
+   * @returns Pole registrovaných pluginů
+   */
+  public getAllPlugins(): Plugin[] {
+    return Array.from(this.plugins.values());
   }
 
-  protected unregisterEffectProcessors(): void {
-    if (this.engine) {
-      // Odregistrování všech efektů přes namespace
-      this.engine.getEffectManager().unregisterNamespace(this.name);
-    }
+  /**
+   * Kontroluje, zda je plugin registrován
+   *
+   * @param pluginName Název pluginu
+   * @returns True pokud je plugin registrován, jinak false
+   */
+  public hasPlugin(pluginName: string): boolean {
+    return this.plugins.has(pluginName);
   }
 
-  protected onDestroy(): void {
-    // Override in subclass for plugin-specific cleanup
-  }
-
-  protected getState() {
-    return this.engine?.getState();
-  }
-
-  protected getLoader<T extends object, K extends string = string>(type: string) {
-    return this.engine?.getLoader<T, K>(type);
-  }
-
-  protected applyEffect(effect: Effect): void {
-    if (this.engine) {
-      const currentState = this.engine.getState();
-      // Pokud efekt už nemá namespace, přidáme ho
-      const namespaceEffect = {
-        ...effect,
-        type: effect.type.includes(':') ? effect.type : `${this.name}:${effect.type}`
-      };
-      const newState = this.engine.getEffectManager().applyEffect(namespaceEffect, currentState);
-      this.engine.getStateManager().setState(newState);
-      this.engine.emit('stateChanged', this.engine.getState());
-    }
-  }
-
-  protected applyEffects(effects: Effect[]): void {
-    if (this.engine && effects.length > 0) {
-      const currentState = this.engine.getState();
-      // Přidáme namespace ke všem efektům, které ho nemají
-      const namespaceEffects = effects.map(effect => ({
-        ...effect,
-        type: effect.type.includes(':') ? effect.type : `${this.name}:${effect.type}`
-      }));
-      const newState = this.engine.getEffectManager().applyEffects(namespaceEffects, currentState);
-      this.engine.getStateManager().setState(newState);
-      this.engine.emit('stateChanged', this.engine.getState());
-    }
-  }
-
-  protected emit(eventType: string, data?: any): void {
-    this.engine?.emit(eventType, data);
-  }
-
-  protected on(eventType: string, listener: (data: any) => void): void {
-    this.engine?.on(eventType, listener);
-  }
-
-  protected off(eventType: string, listener: (data: any) => void): void {
-    this.engine?.off(eventType, listener);
+  /**
+   * Vrátí počet registrovaných pluginů
+   *
+   * @returns Počet registrovaných pluginů
+   */
+  public getPluginCount(): number {
+    return this.plugins.size;
   }
 }

@@ -1,6 +1,5 @@
 import {
   GameState,
-  Choice,
   Scene,
   Types,
   GameEventType,
@@ -16,7 +15,7 @@ import {
   EntityType,
   EntityQuery
 } from '../types';
-import { Effect } from '../effect/types'
+import { Effect } from '../effect/types';
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
@@ -42,6 +41,14 @@ export interface GameEngineOptions {
 
   /** Verze enginu pro ukládání her (volitelné) */
   engineVersion?: string;
+}
+
+export interface SceneTransitionOptions {
+  /** Volitelné efekty, které se aplikují před přechodem */
+  effects?: Effect[];
+
+  /** Volitelná data pro předání scéně při přechodu */
+  data?: any;
 }
 
 /**
@@ -137,9 +144,15 @@ export class GameEngine {
    * Starts the game at the specified scene
    *
    * @param initialSceneKey Key of the scene to start at
+   * @param options Volitelné možnosti přechodu
    * @returns Promise that resolves when the game is started
    */
-  public async start(initialSceneKey: SceneKey): Promise<void> {
+  public async start(initialSceneKey: SceneKey, options?: SceneTransitionOptions): Promise<boolean> {
+    // Aplikace efektů, pokud existují
+    if (options?.effects && options.effects.length > 0) {
+      this.applyEffects(options.effects);
+    }
+
     const success = await this.sceneManager.transitionToScene(
         initialSceneKey,
         this.stateManager.getState(),
@@ -148,11 +161,80 @@ export class GameEngine {
 
     if (success) {
       this.isRunning = true;
-      this.eventEmitter.emit('gameStarted', { sceneKey: initialSceneKey });
-      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
+      this.eventEmitter.emit('gameStarted', {
+        sceneKey: initialSceneKey,
+        transitionData: options?.data
+      });
+      this.eventEmitter.emit('sceneChanged', {
+        scene: this.sceneManager.getCurrentScene(),
+        transitionData: options?.data
+      });
     } else {
       console.error(`Failed to start game at scene '${initialSceneKey}'`);
     }
+
+    return success;
+  }
+
+  /**
+   * Přesune hru do zadané scény
+   *
+   * @param sceneKey Klíč cílové scény
+   * @param options Volitelné možnosti přechodu
+   * @returns Promise který se vyřeší na true, pokud byl přechod úspěšný
+   */
+  public async transitionToScene(
+      sceneKey: SceneKey,
+      options?: SceneTransitionOptions
+  ): Promise<boolean> {
+    // Aplikace efektů, pokud existují
+    if (options?.effects && options.effects.length > 0) {
+      this.applyEffects(options.effects);
+    }
+
+    // Provedení přechodu
+    const success = await this.sceneManager.transitionToScene(
+        sceneKey,
+        this.stateManager.getState(),
+        this
+    );
+
+    if (success) {
+      this.eventEmitter.emit('sceneChanged', {
+        scene: this.sceneManager.getCurrentScene(),
+        transitionData: options?.data
+      });
+    }
+
+    return success;
+  }
+
+  /**
+   * Aplikuje efekty na herní stav
+   *
+   * @param effects Efekty k aplikaci
+   */
+  public applyEffects(effects: Effect[]): void {
+    if (!effects || effects.length === 0) return;
+
+    const currentState = this.stateManager.getState();
+    const newState = this.effectManager.applyEffects(effects, currentState);
+    this.stateManager.setState(newState);
+    this.eventEmitter.emit('stateChanged', this.stateManager.getState());
+  }
+
+  /**
+   * Aplikuje jeden efekt na herní stav
+   *
+   * @param effect Efekt k aplikaci
+   */
+  public applyEffect(effect: Effect): void {
+    if (!effect) return;
+
+    const currentState = this.stateManager.getState();
+    const newState = this.effectManager.applyEffect(effect, currentState);
+    this.stateManager.setState(newState);
+    this.eventEmitter.emit('stateChanged', this.stateManager.getState());
   }
 
   /**
@@ -164,141 +246,6 @@ export class GameEngine {
     return this.isRunning;
   }
 
-  /**
-   * Checks if a choice is available based on its condition
-   *
-   * @param choice The choice to check
-   * @returns true if the choice is available, false otherwise
-   * @private
-   */
-  private isChoiceAvailable(choice: Choice): boolean {
-    if (!choice.condition) return true;
-    return choice.condition(this.stateManager.getState());
-  }
-
-  /**
-   * Processes a choice by applying its effects, showing response, and transitioning to the next scene if specified
-   *
-   * @param choice The choice to process
-   * @returns Promise that resolves when the choice is processed
-   * @private
-   */
-  private async processChoice(choice: Choice): Promise<void> {
-    // Aplikace efektů volby
-    if (choice.effects && choice.effects.length > 0) {
-      this.applyChoiceEffects(choice.effects);
-    }
-
-    // Zpracování textové odpovědi, pokud existuje
-    if (choice.response) {
-      const response = typeof choice.response === 'function'
-          ? choice.response(this.stateManager.getState())
-          : choice.response;
-
-      // Emitujeme událost s odpovědí - UI může na to reagovat
-      this.eventEmitter.emit('choiceResponse', { response });
-    }
-
-    // Přechod na další scénu, pokud je specifikována
-    if (choice.scene) {
-      await this.transitionToNextScene(choice);
-    }
-  }
-
-  /**
-   * Gets the label for a choice, resolving dynamic labels
-   *
-   * @param choice The choice to get the label for
-   * @returns The resolved label text
-   */
-  public getChoiceLabel(choice: Choice): string {
-    if (typeof choice.label === 'function') {
-      return choice.label(this.stateManager.getState());
-    }
-    return choice.label;
-  }
-
-  /**
-   * Selects a choice in the current scene
-   *
-   * @param choiceIndex Index of the choice to select
-   * @returns Promise that resolves when the choice is processed
-   */
-  public async selectChoice(choiceIndex: number): Promise<void> {
-    const currentScene = this.sceneManager.getCurrentScene();
-    if (!currentScene) return;
-
-    const choice = currentScene.choices[choiceIndex];
-    if (!choice) {
-      console.error(`Choice with index ${choiceIndex} not found in current scene.`);
-      return;
-    }
-
-    if (!this.isChoiceAvailable(choice)) {
-      console.warn(`Choice with index ${choiceIndex} is not available.`);
-      return;
-    }
-
-    this.eventEmitter.emit('choiceSelected', { choice });
-    await this.processChoice(choice);
-  }
-
-  /**
-   * Selects a choice by its shortcut
-   *
-   * @param shortcut The shortcut key to select
-   * @returns Promise that resolves when the choice is processed, or false if no matching shortcut is found
-   */
-  public async selectChoiceByShortcut(shortcut: string): Promise<boolean> {
-    const choices = this.getAvailableChoices();
-    const choiceIndex = choices.findIndex(choice => choice.shortcut === shortcut);
-
-    if (choiceIndex === -1) {
-      return false;
-    }
-
-    await this.selectChoice(choiceIndex);
-    return true;
-  }
-
-  /**
-   * Applies effects of a choice to the game state
-   *
-   * @param effects Array of effects to apply
-   * @private
-   */
-  private applyChoiceEffects(effects: Effect[]): void {
-    const currentState = this.stateManager.getState();
-    const newState = this.effectManager.applyEffects(effects, currentState);
-    this.stateManager.setState(newState);
-    this.eventEmitter.emit('stateChanged', this.stateManager.getState());
-  }
-
-  /**
-   * Transitions to the next scene based on a choice
-   *
-   * @param choice The choice containing the scene to transition to
-   * @returns Promise that resolves when the transition is complete
-   * @private
-   */
-  private async transitionToNextScene(choice: Choice): Promise<void> {
-    let nextSceneKey: string;
-    if (typeof choice.scene === 'function') {
-      nextSceneKey = choice.scene(this.stateManager.getState());
-    } else {
-      nextSceneKey = choice.scene as string;
-    }
-
-    const success = await this.sceneManager.transitionToScene(
-        nextSceneKey,
-        this.stateManager.getState(),
-        this
-    );
-
-    if (success) {
-      this.eventEmitter.emit('sceneChanged', this.sceneManager.getCurrentScene());
-    }
-  }
 
   /**
    * Registers a content definition with the appropriate loader
@@ -392,14 +339,6 @@ export class GameEngine {
     return this.sceneManager.getCurrentSceneKey();
   }
 
-  /**
-   * Returns available choices for the current scene, filtered by conditions
-   *
-   * @returns Array of available choices
-   */
-  public getAvailableChoices(): Choice[] {
-    return this.sceneManager.getAvailableChoices(this.stateManager.getState());
-  }
 
   /**
    * Registers a plugin with the game engine

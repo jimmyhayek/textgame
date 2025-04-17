@@ -1,4 +1,4 @@
-import { AbstractPlugin, GameEngine, GameState, SceneKey } from '@pabitel/core';
+import { AbstractPlugin, GameState } from '@pabitel/core';
 import { Command, CommandPluginOptions, CommandProcessResult } from './types';
 import Fuse from 'fuse.js';
 
@@ -14,7 +14,6 @@ export class CommandPlugin extends AbstractPlugin<CommandPluginOptions> {
      * Instance Fuse.js pro vyhledávání
      */
     private fuse: Fuse<{ command: Command; pattern: string }> | null = null;
-
 
     /**
      * Vytvoří novou instanci CommandPluginu
@@ -36,7 +35,6 @@ export class CommandPlugin extends AbstractPlugin<CommandPluginOptions> {
             ...options
         });
     }
-
 
     /**
      * Zpracuje textový příkaz od uživatele
@@ -199,62 +197,40 @@ export class CommandPlugin extends AbstractPlugin<CommandPluginOptions> {
 
         // Aplikace efektů
         if (command.effects && command.effects.length > 0) {
-            // Použijeme standardní mechanismus aplikace efektů
-            const currentState = this.engine.getState();
-            const newState = this.engine.getEffectManager().applyEffects(command.effects, currentState);
-            this.engine.getStateManager().setState(newState);
-            this.engine.emit('stateChanged', this.engine.getState());
+            // Použijeme nové API enginu pro aplikaci efektů
+            this.engine.applyEffects(command.effects);
         }
 
         // Přechod na další scénu, pokud je specifikována
+        let success = true;
         if (command.scene) {
-            let nextSceneKey: SceneKey;
+            let nextSceneKey: string;
 
             if (typeof command.scene === 'function') {
-                nextSceneKey = command.scene(this.engine.getState());
+                nextSceneKey = command.scene(state);
             } else {
                 nextSceneKey = command.scene;
             }
 
-            // Použijeme engine k přechodu na další scénu
-            await this.transitionToScene(nextSceneKey);
+            // Použijeme nové API enginu pro přechod na další scénu
+            success = await this.engine.transitionToScene(nextSceneKey);
         }
 
         // Emitujeme událost o zpracování příkazu
-        this.engine.emit('commandProcessed', {
+        this.emitNamespacedEvent('commandProcessed', {
             command,
             response,
             pattern,
-            score
+            score,
+            success
         });
 
         return {
-            success: true,
+            success,
             response,
             command,
             matchDetails: { pattern, score }
         };
-    }
-
-    /**
-     * Přechod na novou scénu
-     *
-     * @param sceneKey Klíč cílové scény
-     * @returns Promise, který se vyřeší po přechodu
-     */
-    private async transitionToScene(sceneKey: SceneKey): Promise<boolean> {
-        if (!this.engine) return false;
-
-        return await this.engine.getSceneManager().transitionToScene(
-            sceneKey,
-            this.engine.getState(),
-            this.engine
-        ).then(success => {
-            if (success) {
-                this.engine?.emit('sceneChanged', this.engine.getCurrentScene());
-            }
-            return success;
-        });
     }
 
     /**
@@ -282,7 +258,7 @@ export class CommandPlugin extends AbstractPlugin<CommandPluginOptions> {
     /**
      * Čištění zdrojů při odregistrování pluginu
      */
-    protected override onDestroy(): void {
+    protected override async onDestroy(): Promise<void> {
         this.fuse = null;
     }
 }

@@ -1,5 +1,3 @@
-// packages/plugin-commands/src/types.ts
-
 import { SceneKey, GameState, Effect } from '@pabitel/core';
 
 /**
@@ -99,6 +97,16 @@ export interface CommandPluginOptions {
      * Další možnosti pro rozšíření funkcionality
      */
     [key: string]: any;
+}
+
+/**
+ * Typy událostí emitovaných CommandPluginem
+ */
+export enum CommandPluginEvents {
+    COMMAND_PROCESSED = 'commands:commandProcessed',
+    COMMAND_NOT_FOUND = 'commands:commandNotFound',
+    AVAILABLE_COMMANDS = 'commands:availableCommands',
+    COMMAND_HINTS = 'commands:commandHints'
 }
 
 /**

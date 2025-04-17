@@ -1,15 +1,7 @@
-import { GameEngine } from '../engine/GameEngine';
-import { Plugin } from './types';
-import { GenericContentLoader } from '../content/GenericContentLoader';
-import { Effect, EffectProcessor, GameState, GameEventType, EventListener } from '../types';
-
-/**
- * Base configuration options for plugins
- */
-export interface PluginOptions {
-    /** Optional configuration parameters */
-    [key: string]: any;
-}
+import { GameEngine } from '../core/GameEngine';
+import { Plugin, PluginOptions } from './types';
+import { GenericContentLoader } from '../loaders/GenericContentLoader';
+import { Effect, GameState, GameEventType, EventListener, SceneKey } from '../types';
 
 /**
  * Abstract base class for plugins
@@ -236,48 +228,6 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Applies an effect to the game state with automatic namespace prefix
-     *
-     * @param effect Effect to apply
-     */
-    protected applyEffect(effect: Effect): void {
-        if (!this.engine) return;
-
-        const currentState = this.engine.getState();
-
-        // Add namespace to effect type if it doesn't have one
-        const namespacedEffect = {
-            ...effect,
-            type: this.namespaceEffectType(effect.type)
-        };
-
-        const newState = this.engine.getEffectManager().applyEffect(namespacedEffect, currentState);
-        this.engine.getStateManager().setState(newState);
-        this.engine.emit('stateChanged', this.engine.getState());
-    }
-
-    /**
-     * Applies multiple effects to the game state with automatic namespace prefix
-     *
-     * @param effects Array of effects to apply
-     */
-    protected applyEffects(effects: Effect[]): void {
-        if (!this.engine || effects.length === 0) return;
-
-        const currentState = this.engine.getState();
-
-        // Add namespace to all effects that don't have one
-        const namespacedEffects = effects.map(effect => ({
-            ...effect,
-            type: this.namespaceEffectType(effect.type)
-        }));
-
-        const newState = this.engine.getEffectManager().applyEffects(namespacedEffects, currentState);
-        this.engine.getStateManager().setState(newState);
-        this.engine.emit('stateChanged', this.engine.getState());
-    }
-
-    /**
      * Emits an event with namespace prefix
      *
      * @param eventType Event type
@@ -370,5 +320,46 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
      */
     protected getEntitiesByType(type: string): any[] {
         return this.findEntities(manager => manager.findEntitiesByType(type));
+    }
+
+    /**
+     * Přesune hru do zadané scény pomocí enginu
+     * Pohodlná metoda pro použití v pluginech
+     *
+     * @param sceneKey Klíč cílové scény
+     * @param options Volitelné možnosti přechodu
+     * @returns Promise který se vyřeší na true, pokud byl přechod úspěšný
+     */
+    protected async transitionToScene(
+        sceneKey: SceneKey,
+        options?: {
+            effects?: Effect[],
+            data?: any
+        }
+    ): Promise<boolean> {
+        if (!this.engine) return false;
+        return await this.engine.transitionToScene(sceneKey, options);
+    }
+
+    /**
+     * Aplikuje efekt na herní stav pomocí enginu
+     * Pohodlná metoda pro použití v pluginech
+     *
+     * @param effect Efekt k aplikaci
+     */
+    protected applyEffect(effect: Effect): void {
+        if (!this.engine) return;
+        this.engine.applyEffect(effect);
+    }
+
+    /**
+     * Aplikuje více efektů na herní stav pomocí enginu
+     * Pohodlná metoda pro použití v pluginech
+     *
+     * @param effects Efekty k aplikaci
+     */
+    protected applyEffects(effects: Effect[]): void {
+        if (!this.engine) return;
+        this.engine.applyEffects(effects);
     }
 }

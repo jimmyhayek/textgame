@@ -5,3 +5,8 @@ export interface Types {
   initialize: (engine: GameEngine) => void;
   destroy?: () => void;
 }
+
+export interface PluginOptions {
+  /** Optional configuration parameters */
+  [key: string]: any;
+}

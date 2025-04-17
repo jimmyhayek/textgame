@@ -1,7 +1,7 @@
 // packages/core/src/types/scene.ts
 
 import { GameState } from './state';
-import { Effect } from './effect';
+import { Effect } from '../effect/effect';
 
 /**
  * Typ pro klíč scény (typicky odvozeno od cesty k souboru)

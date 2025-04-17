@@ -1,4 +1,4 @@
-export * from './EffectManager';
+export * from '../effect/EffectManager';
 export * from './EventEmitter';
 export * from './GameEngine';
 export * from '../plugin/PluginManager';

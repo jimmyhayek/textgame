@@ -1,10 +1,7 @@
-// src/core/GameEngine.ts
-
 import {
   GameState,
   Choice,
   Scene,
-  Effect,
   Types,
   GameEventType,
   EventListener,
@@ -19,10 +16,11 @@ import {
   EntityType,
   EntityQuery
 } from '../types';
+import { Effect } from '../effect/types'
 import { EventEmitter } from './EventEmitter';
 import { StateManager } from './StateManager';
 import { SceneManager } from './SceneManager';
-import { EffectManager } from './EffectManager';
+import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
 import { GenericContentLoader } from '../loaders';
 import { SaveManager } from '../save';

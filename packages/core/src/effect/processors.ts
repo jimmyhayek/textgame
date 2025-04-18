@@ -6,7 +6,7 @@ import {
     ConditionalEffect,
     RepeatEffect,
 } from './types';
-import { GameState } from '../types';
+import { GameState } from '../state/types';
 import { produce } from '../utils/immer';
 import get from 'lodash/get';
 import set from 'lodash/set';
@@ -14,7 +14,26 @@ import set from 'lodash/set';
 type ProcessorRegistry = Record<string, EffectProcessor>;
 
 /**
- * Registruje všechny výchozí procesory efektů
+ * Pomocná funkce pro zpracování efektu
+ * (Lokální ekvivalent processSingleEffect z EffectManager)
+ * @private
+ */
+function processSingleEffect(
+    effect: any,
+    draftState: GameState,
+    processors: ProcessorRegistry
+): void {
+    const processor = processors[effect.type];
+
+    if (processor) {
+        processor(effect, draftState);
+    } else {
+        console.warn(`No processor registered for effect type '${effect.type}'`);
+    }
+}
+
+/**
+ * Vytvoří registry procesorů výchozích efektů
  *
  * @returns Objekt mapující typy efektů na jejich procesory
  */
@@ -241,22 +260,4 @@ export function createDefaultEffectProcessors(): ProcessorRegistry {
     };
 
     return processors;
-}
-
-/**
- * Pomocná funkce pro zpracování efektu
- * (Lokální ekvivalent processSingleEffect z EffectManager)
- */
-function processSingleEffect(
-    effect: any,
-    draftState: GameState,
-    processors: ProcessorRegistry
-): void {
-    const processor = processors[effect.type];
-
-    if (processor) {
-        processor(effect, draftState);
-    } else {
-        console.warn(`No processor registered for effect type '${effect.type}'`);
-    }
 }

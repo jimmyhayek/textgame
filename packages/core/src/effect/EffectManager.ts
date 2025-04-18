@@ -1,7 +1,7 @@
-import { GameState } from '../types';
-import { Effect, EffectProcessor, EffectType, BuiltInEffectType} from './types';
+import { GameState } from '../state/types';
+import { Effect, EffectProcessor, EffectType, BuiltInEffectType } from './types';
 import { produce } from '../utils/immer';
-import { createDefaultEffectProcessors } from './defaultEffectProcessors';
+import { createDefaultEffectProcessors } from './processors';
 
 const NAMESPACE_SEPARATOR = ':';
 
@@ -9,7 +9,14 @@ const NAMESPACE_SEPARATOR = ':';
  * Manažer efektů pro zpracování herních efektů
  */
 export class EffectManager {
+  /**
+   * Mapa procesorů efektů podle typu
+   */
   private effectProcessors: Map<string, EffectProcessor> = new Map();
+
+  /**
+   * Záložní procesor pro neznámé typy efektů
+   */
   private fallbackProcessor: EffectProcessor | null = null;
 
   /**
@@ -30,6 +37,7 @@ export class EffectManager {
    *
    * @param effect Efekt ke zpracování
    * @param draftState Návrh herního stavu pro modifikaci
+   * @private
    */
   private processSingleEffect(effect: Effect, draftState: GameState): void {
     const processor = this.effectProcessors.get(effect.type);
@@ -45,6 +53,7 @@ export class EffectManager {
 
   /**
    * Registruje výchozí efektové procesory
+   * @private
    */
   private registerDefaultEffects(): void {
     const defaultProcessors = createDefaultEffectProcessors();
@@ -68,6 +77,7 @@ export class EffectManager {
    * @param effectType Typ efektu
    * @param namespace Jmenný prostor (volitelný)
    * @returns Kompletní klíč procesoru
+   * @private
    */
   private getFullEffectType(effectType: EffectType, namespace?: string): string {
     if (!namespace) {

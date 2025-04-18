@@ -1,36 +1,38 @@
-import { GameEngine } from '../core/GameEngine';
+import { GameEngine } from '../engine/GameEngine';
 import { Plugin, PluginOptions } from './types';
-import { GenericContentLoader } from '../loaders/GenericContentLoader';
-import { Effect, GameState, GameEventType, EventListener, SceneKey } from '../types';
+import { GenericContentLoader } from '../content/GenericContentLoader';
+import { Effect, EffectProcessor } from '../effect/types';
+import { GameState, GameEventType, EventListener } from '../state/types';
+import { SceneKey } from '../scene/types';
 
 /**
- * Abstract base class for plugins
- * Provides common functionality and structure for all plugins
+ * Abstraktní základní třída pro pluginy
+ * Poskytuje společnou funkcionalitu a strukturu pro všechny pluginy
  */
 export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptions> implements Plugin {
-    /** Plugin name */
+    /** Název pluginu */
     public readonly name: string;
 
-    /** Plugin options */
+    /** Možnosti konfigurace pluginu */
     protected options: Options;
 
-    /** Reference to game engine */
+    /** Reference na herní engine */
     protected engine: GameEngine | null = null;
 
-    /** Content loaders used by this plugin */
+    /** Loadery obsahu používané tímto pluginem */
     protected loaders: Map<string, GenericContentLoader<any>> = new Map();
 
-    /** Registered effects with this plugin's namespace */
+    /** Registrované efekty s jmenným prostorem tohoto pluginu */
     protected registeredEffects: Set<string> = new Set();
 
-    /** Registered event listeners for easy unregistration */
+    /** Registrované posluchače událostí pro snadnou odregistraci */
     private eventListeners: Map<GameEventType, Set<EventListener>> = new Map();
 
     /**
-     * Creates a new plugin instance
+     * Vytvoří novou instanci pluginu
      *
-     * @param name Plugin name
-     * @param options Plugin options
+     * @param name Název pluginu
+     * @param options Možnosti konfigurace pluginu
      */
     constructor(name: string, options: Options) {
         this.name = name;
@@ -39,88 +41,88 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Sets up content loaders used by this plugin
-     * Override this method to initialize specific plugin loaders
+     * Nastaví loadery obsahu používané tímto pluginem
+     * Přepište tuto metodu pro inicializaci specifických loaderů pluginu
      */
     protected setupLoaders(): void {
-        // Override in subclass to register specific loaders
+        // Přepište v potomkovi pro registraci specifických loaderů
     }
 
     /**
-     * Initializes the plugin with the game engine
-     * This method is now asynchronous to allow async initialization
+     * Inicializuje plugin s herním enginem
+     * Tato metoda je nyní asynchronní pro podporu asynchronní inicializace
      *
-     * @param engine Game engine instance
+     * @param engine Instance herního enginu
      */
     public async initialize(engine: GameEngine): Promise<void> {
         this.engine = engine;
 
-        // Register all loaders with the engine
+        // Registrace všech loaderů v enginu
         this.loaders.forEach((loader, type) => {
             engine.getLoaderRegistry().registerLoader(type, loader);
         });
 
-        // Register content
+        // Registrace obsahu
         await this.registerContent();
 
-        // Register event handlers
+        // Registrace posluchačů událostí
         this.registerEventHandlers();
 
-        // Register effect processors
+        // Registrace procesorů efektů
         this.registerEffectProcessors();
 
-        // Run plugin-specific initialization
+        // Spuštění inicializace specifické pro plugin
         await this.onInitialize();
     }
 
     /**
-     * Registers content with the engine
-     * Override this method to register plugin-specific content
-     * Now asynchronous to support lazy loading
+     * Registruje obsah v enginu
+     * Přepište tuto metodu pro registraci obsahu specifického pro plugin
+     * Nyní asynchronní pro podporu lazy loadingu
      */
     protected async registerContent(): Promise<void> {
-        // Override in subclass to register specific content
+        // Přepište v potomkovi pro registraci specifického obsahu
     }
 
     /**
-     * Registers event handlers with the engine
-     * Override this method to register plugin-specific event handlers
+     * Registruje posluchače událostí v enginu
+     * Přepište tuto metodu pro registraci posluchačů specifických pro plugin
      */
     protected registerEventHandlers(): void {
-        // Override in subclass to register specific event handlers
+        // Přepište v potomkovi pro registraci specifických posluchačů událostí
     }
 
     /**
-     * Registers effect processors with the engine
-     * Override this method to register plugin-specific effect processors
+     * Registruje procesory efektů v enginu
+     * Přepište tuto metodu pro registraci procesorů specifických pro plugin
      */
     protected registerEffectProcessors(): void {
-        // Override in subclass to register specific effect processors
+        // Přepište v potomkovi pro registraci specifických procesorů efektů
     }
 
     /**
-     * Called during plugin initialization
-     * Override this method for plugin-specific initialization logic
-     * Now asynchronous to support async initialization
+     * Volá se během inicializace pluginu
+     * Přepište tuto metodu pro logiku inicializace specifické pro plugin
+     * Nyní asynchronní pro podporu asynchronní inicializace
      */
     protected async onInitialize(): Promise<void> {
-        // Override in subclass for plugin-specific initialization
+        // Přepište v potomkovi pro logiku specifickou pro plugin
     }
 
     /**
-     * Cleans up plugin resources
-     * Called when unregistering the plugin
+     * Vyčistí zdroje pluginu
+     * Volá se při odregistraci pluginu
      */
     public async destroy(): Promise<void> {
-        // Remove all event handlers
+        // Odregistrace všech posluchačů událostí
         if (this.engine) {
             this.unregisterEventHandlers();
             this.unregisterEffectProcessors();
 
-            // Run plugin-specific cleanup
+            // Spuštění čištění specifického pro plugin
             await this.onDestroy();
 
-            // Remove loaders registered by this plugin
+            // Odregistrace loaderů registrovaných tímto pluginem
             this.loaders.forEach((_, type) => {
                 this.engine?.getLoaderRegistry().removeLoader(type);
             });
@@ -130,14 +132,14 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Unregisters event handlers from the engine
+     * Odregistruje posluchače událostí z enginu
      */
     protected unregisterEventHandlers(): void {
         if (this.engine) {
-            // Unregister all tracked event handlers
+            // Odregistrace všech sledovaných posluchačů událostí
             this.eventListeners.forEach((listeners, eventType) => {
                 listeners.forEach(listener => {
-                    this.engine?.off(eventType, listener);
+                    this.engine?.getEventEmitter().off(eventType, listener);
                 });
             });
             this.eventListeners.clear();
@@ -145,59 +147,59 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Unregisters effect processors
+     * Odregistruje procesory efektů
      */
     protected unregisterEffectProcessors(): void {
         if (this.engine) {
-            // Unregister all effects via namespace
+            // Odregistrace všech efektů pomocí jmenného prostoru
             this.engine.getEffectManager().unregisterNamespace(this.name);
             this.registeredEffects.clear();
         }
     }
 
     /**
-     * Called during plugin cleanup
-     * Override this method for plugin-specific cleanup logic
-     * Now asynchronous to support async cleanup
+     * Volá se během čištění pluginu
+     * Přepište tuto metodu pro logiku čištění specifickou pro plugin
+     * Nyní asynchronní pro podporu asynchronního čištění
      */
     protected async onDestroy(): Promise<void> {
-        // Override in subclass for plugin-specific cleanup
+        // Přepište v potomkovi pro logiku čištění specifickou pro plugin
     }
 
     /**
-     * Gets the current game state
+     * Získá aktuální herní stav
      *
-     * @returns Current game state or undefined if plugin is not initialized
+     * @returns Aktuální herní stav nebo undefined pokud plugin není inicializován
      */
     protected getState(): GameState | undefined {
         return this.engine?.getState();
     }
 
     /**
-     * Gets content loader by type
+     * Získá loader obsahu podle typu
      *
-     * @param type Content type
-     * @returns Content loader or undefined if not found
+     * @param type Typ obsahu
+     * @returns Loader obsahu nebo undefined pokud nenalezen
      */
     protected getLoader<T extends object, K extends string = string>(type: string): GenericContentLoader<T, K> | undefined {
-        return this.engine?.getLoader<T, K>(type);
+        return this.engine?.getLoaderRegistry().getLoader<T, K>(type);
     }
 
     /**
-     * Adds namespace prefix to effect type if needed
+     * Přidá namespace prefix k typu efektu, pokud je potřeba
      *
-     * @param effectType Effect type to namespace
-     * @returns Namespaced effect type
+     * @param effectType Typ efektu k prefixování
+     * @returns Prefixovaný typ efektu
      */
     private namespaceEffectType(effectType: string): string {
         return effectType.includes(':') ? effectType : `${this.name}:${effectType}`;
     }
 
     /**
-     * Registers an effect processor with automatic namespace prefix
+     * Registruje procesor efektu s automatickým prefixem namespace
      *
-     * @param effectType Effect type
-     * @param processor Function to process the effect
+     * @param effectType Typ efektu
+     * @param processor Funkce pro zpracování efektu
      */
     protected registerEffectProcessor(effectType: string, processor: EffectProcessor): void {
         if (this.engine) {
@@ -208,14 +210,14 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Registers multiple effect processors at once
+     * Registruje více procesorů efektů najednou
      *
-     * @param processors Object mapping effect types to processors
+     * @param processors Objekt mapující typy efektů na procesory
      */
     protected registerEffectProcessors(processors: Record<string, EffectProcessor>): void {
         if (!this.engine) return;
 
-        // Add namespace to all effect types
+        // Přidání namespace ke všem typům efektů
         const namespacedProcessors: Record<string, EffectProcessor> = {};
 
         for (const [type, processor] of Object.entries(processors)) {
@@ -228,30 +230,30 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Emits an event with namespace prefix
+     * Emituje událost s prefixem namespace
      *
-     * @param eventType Event type
-     * @param data Optional event data
+     * @param eventType Typ události
+     * @param data Volitelná data události
      */
     protected emitNamespacedEvent(eventType: string, data?: any): void {
         if (this.engine) {
             const namespacedType = eventType.includes(':') ? eventType : `${this.name}:${eventType}`;
-            this.engine.emit(namespacedType, data);
+            this.engine.getEventEmitter().emit(namespacedType, data);
         }
     }
 
     /**
-     * Registers an event listener and tracks it for automatic unregistration
+     * Registruje posluchače události a sleduje ho pro automatickou odregistraci
      *
-     * @param eventType Event type
-     * @param listener Function called when the event occurs
+     * @param eventType Typ události
+     * @param listener Funkce volaná při události
      */
     protected registerEventListener(eventType: GameEventType, listener: EventListener): void {
         if (this.engine) {
-            // Register with engine
-            this.engine.on(eventType, listener);
+            // Registrace v enginu
+            this.engine.getEventEmitter().on(eventType, listener);
 
-            // Track for later unregistration
+            // Sledování pro pozdější odregistraci
             if (!this.eventListeners.has(eventType)) {
                 this.eventListeners.set(eventType, new Set());
             }
@@ -260,17 +262,17 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
     }
 
     /**
-     * Unregisters an event listener
+     * Odregistruje posluchače události
      *
-     * @param eventType Event type
-     * @param listener Function that was registered
+     * @param eventType Typ události
+     * @param listener Funkce, která byla registrována
      */
     protected unregisterEventListener(eventType: GameEventType, listener: EventListener): void {
         if (this.engine) {
-            // Unregister from engine
-            this.engine.off(eventType, listener);
+            // Odregistrace z enginu
+            this.engine.getEventEmitter().off(eventType, listener);
 
-            // Remove from tracking
+            // Odstranění ze sledování
             const listeners = this.eventListeners.get(eventType);
             if (listeners) {
                 listeners.delete(listener);
@@ -279,47 +281,6 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
                 }
             }
         }
-    }
-
-    /**
-     * Generic method to find entities by criteria
-     *
-     * @param criteria Function to query entities
-     * @returns Array of entities matching criteria
-     */
-    protected findEntities<T>(criteria: (manager: any) => T[]): T[] {
-        if (!this.engine) return [];
-        return criteria(this.engine.getEntityManager());
-    }
-
-    /**
-     * Returns entities with specific tag
-     *
-     * @param tag Tag to filter by
-     * @returns Array of entities with given tag
-     */
-    protected getEntitiesByTag(tag: string): any[] {
-        return this.findEntities(manager => manager.findEntitiesByTag(tag));
-    }
-
-    /**
-     * Returns entities with specific component
-     *
-     * @param componentName Component name
-     * @returns Array of entities with given component
-     */
-    protected getEntitiesByComponent(componentName: string): any[] {
-        return this.findEntities(manager => manager.findEntitiesByComponent(componentName));
-    }
-
-    /**
-     * Returns entities of specific type
-     *
-     * @param type Entity type
-     * @returns Array of entities of given type
-     */
-    protected getEntitiesByType(type: string): any[] {
-        return this.findEntities(manager => manager.findEntitiesByType(type));
     }
 
     /**

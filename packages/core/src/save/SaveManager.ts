@@ -1,14 +1,14 @@
 import {
-    GameEventType,
-    EventListener,
     SaveData,
     SaveMetadata,
     SaveOptions,
     SaveStorage,
-    AutoSaveOptions
-} from '../types';
-import { GameEngine } from '../core';
-import { EventEmitter } from '../core/EventEmitter';
+    AutoSaveOptions,
+    SaveEvents
+} from './types';
+import { GameEngine } from '../engine/GameEngine';
+import { EventEmitter } from '../event/EventEmitter';
+import { SceneKey } from '../scene/types';
 
 // Aktuální verze formátu uložených her
 const CURRENT_SAVE_VERSION = 1;
@@ -80,11 +80,12 @@ export class SaveManager {
     constructor(engine: GameEngine, options: {
         storage: SaveStorage;
         engineVersion?: string;
+        eventEmitter?: EventEmitter;
     }) {
         this.engine = engine;
         this.storage = options.storage;
         this.engineVersion = options.engineVersion || '0.1.0';
-        this.eventEmitter = new EventEmitter();
+        this.eventEmitter = options.eventEmitter || engine.getEventEmitter();
         this.gameStartTime = Date.now();
 
         // Sledování událostí enginu
@@ -96,7 +97,7 @@ export class SaveManager {
      */
     private setupEventListeners(): void {
         // Sledování začátku hry pro reset času
-        this.engine.on('gameStarted', () => {
+        this.eventEmitter.on('gameStarted', () => {
             this.gameStartTime = Date.now();
         });
 
@@ -140,7 +141,7 @@ export class SaveManager {
         const success = await this.storage.save(saveId, saveData);
 
         if (success) {
-            this.eventEmitter.emit('gameSaved', { saveId, metadata });
+            this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, metadata });
         }
 
         return success;
@@ -174,10 +175,10 @@ export class SaveManager {
             // Přechod na uloženou scénu
             const currentSceneKey = migratedData.metadata.currentSceneKey;
             if (currentSceneKey) {
-                await this.engine.start(currentSceneKey);
+                await this.engine.transitionToScene(currentSceneKey as SceneKey);
             }
 
-            this.eventEmitter.emit('gameLoaded', { saveId, metadata: migratedData.metadata });
+            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, metadata: migratedData.metadata });
             return true;
         } catch (error) {
             console.error(`Failed to load game with id '${saveId}':`, error);
@@ -204,7 +205,7 @@ export class SaveManager {
         const success = await this.storage.delete(saveId);
 
         if (success) {
-            this.eventEmitter.emit('gameDeleted', { saveId });
+            this.eventEmitter.emit(SaveEvents.GAME_DELETED, { saveId });
         }
 
         return success;
@@ -259,7 +260,7 @@ export class SaveManager {
             this.performAutoSave();
         }, this.autoSaveOptions.interval);
 
-        this.eventEmitter.emit('autoSaveEnabled', { options: this.autoSaveOptions });
+        this.eventEmitter.emit(SaveEvents.AUTO_SAVE_ENABLED, { options: this.autoSaveOptions });
     }
 
     /**
@@ -270,7 +271,7 @@ export class SaveManager {
             clearInterval(this.autoSaveTimer);
             this.autoSaveTimer = null;
             this.autoSaveOptions = null;
-            this.eventEmitter.emit('autoSaveDisabled', {});
+            this.eventEmitter.emit(SaveEvents.AUTO_SAVE_DISABLED, {});
         }
     }
 
@@ -304,26 +305,6 @@ export class SaveManager {
         }
 
         return success;
-    }
-
-    /**
-     * Registruje listener pro události SaveManageru
-     *
-     * @param eventType Typ události
-     * @param listener Funkce volaná při události
-     */
-    public on(eventType: GameEventType, listener: EventListener): void {
-        this.eventEmitter.on(eventType, listener);
-    }
-
-    /**
-     * Odregistruje listener pro události SaveManageru
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která byla zaregistrována
-     */
-    public off(eventType: GameEventType, listener: EventListener): void {
-        this.eventEmitter.off(eventType, listener);
     }
 
     /**
@@ -417,7 +398,7 @@ export class SaveManager {
         const allSuccessful = results.every(result => result);
 
         if (allSuccessful) {
-            this.eventEmitter.emit('allSavesCleared', {});
+            this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, {});
         }
 
         return allSuccessful;
@@ -439,6 +420,6 @@ export class SaveManager {
      */
     public setStorage(storage: SaveStorage): void {
         this.storage = storage;
-        this.eventEmitter.emit('storageChanged', { storage });
+        this.eventEmitter.emit(SaveEvents.STORAGE_CHANGED, { storage });
     }
 }

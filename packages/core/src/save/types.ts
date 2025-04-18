@@ -178,3 +178,16 @@ export interface SaveStorage {
      */
     exists(id: string): Promise<boolean>;
 }
+
+/**
+ * Typy událostí emitovaných SaveManager
+ */
+export enum SaveEvents {
+    GAME_SAVED = 'save:gameSaved',
+    GAME_LOADED = 'save:gameLoaded',
+    GAME_DELETED = 'save:gameDeleted',
+    AUTO_SAVE_ENABLED = 'save:autoSaveEnabled',
+    AUTO_SAVE_DISABLED = 'save:autoSaveDisabled',
+    ALL_SAVES_CLEARED = 'save:allSavesCleared',
+    STORAGE_CHANGED = 'save:storageChanged'
+}

@@ -9,15 +9,14 @@ import {
 import { GameState } from '../state/types';
 import { Scene, SceneKey, SceneTransitionOptions } from '../scene/types';
 import { Effect } from '../effect/types';
-import { EventEmitter } from '../event/EventEmitter';
-import { StateManager } from '../state/StateManager';
+import { EventEmitter } from '../event';
+import { StateManager } from '../state';
 import { SceneManager } from '../scene/SceneManager';
 import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
 import { GenericContentLoader } from '../content/GenericContentLoader';
 import { LoaderRegistry } from '../content/LoaderRegistry';
 import { SaveManager } from '../save/SaveManager';
-import { EntityManager } from '../entity/EntityManager';
 import { ContentDefinition } from '../content/types';
 import { Plugin } from '../plugin/types';
 import { createSaveManager } from '../save/utils';
@@ -54,9 +53,6 @@ export class GameEngine {
     /** Správce ukládání a načítání */
     private readonly saveManager: SaveManager;
 
-    /** Správce entit */
-    private readonly entityManager: EntityManager;
-
     /** Příznak, zda je hra spuštěna */
     private isRunning: boolean = false;
 
@@ -89,9 +85,6 @@ export class GameEngine {
         // Vytvoření správce efektů
         this.effectManager = new EffectManager();
 
-        // Inicializace správce entit
-        this.entityManager = new EntityManager(this.stateManager, this.eventEmitter);
-
         // Registrace loaderu scén
         this.loaderRegistry.registerLoader('scenes', sceneLoader);
 
@@ -114,7 +107,7 @@ export class GameEngine {
         }
 
         // Inicializace pluginů
-        this.initializePlugins(plugins);
+        this.initializePlugins(plugins)
     }
 
     /**
@@ -446,14 +439,6 @@ export class GameEngine {
         return this.saveManager;
     }
 
-    /**
-     * Vrátí správce entit
-     *
-     * @returns Správce entit
-     */
-    public getEntityManager(): EntityManager {
-        return this.entityManager;
-    }
 
     /**
      * Vrátí event emitter
@@ -536,9 +521,6 @@ export class GameEngine {
         } else {
             this.stateManager.resetState();
         }
-
-        // Resetujeme entity
-        this.entityManager.clearAllEntities();
 
         // Určíme počáteční scénu
         const initialSceneKey = options.initialSceneKey || this.getCurrentSceneKey() || 'start';

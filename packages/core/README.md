@@ -1,105 +1,105 @@
 # @pabitel/core
 
-Core engine for creating modular, flexible, and story-driven text-based games.
+Core engine pro vytváření modulárních, flexibilních a příběhově zaměřených textových her.
 
-## Overview
+## Přehled
 
-Pabitel Core is a minimalist yet powerful framework designed for building interactive narratives, text adventures, and choice-based games. With a strong focus on modularity and type safety, it provides the essential building blocks needed to create complex storytelling experiences without dictating how you structure your game content.
+Pabitel Core je minimalistický, ale výkonný framework navržený pro tvorbu interaktivních narativů, textových adventur a her založených na volbách. S důrazem na modularitu a typovou bezpečnost poskytuje základní stavební bloky potřebné k vytváření komplexních příběhových zážitků, aniž by diktoval, jak strukturovat obsah vaší hry.
 
-## Key Features
+## Klíčové vlastnosti
 
-- **Minimalist Core** - Small, focused API with only the essentials
-- **Modular Design** - Use only what you need, extend with plugins
-- **Type Safety** - Built with TypeScript for robust development
-- **Declarative Content** - Define game content with simple, declarative syntax
-- **Lazy Loading** - Load content on demand for optimal performance
-- **Flexible Structure** - Organize your game content however you want
-- **Plugin System** - Easily extend the engine with custom functionality
+- **Minimalistické jádro** - Malé, cílené API obsahující pouze nezbytné součásti
+- **Modulární design** - Používejte pouze to, co potřebujete, rozšiřujte pomocí pluginů
+- **Typová bezpečnost** - Vytvořeno v TypeScriptu pro robustní vývoj
+- **Deklarativní obsah** - Definujte herní obsah jednoduchým, deklarativním způsobem
+- **Lazy loading** - Načítejte obsah na vyžádání pro optimální výkon
+- **Flexibilní struktura** - Organizujte herní obsah jakýmkoliv způsobem
+- **Systém pluginů** - Snadno rozšiřujte engine o vlastní funkcionalitu
 
-## Installation
+## Instalace
 
 ```bash
-# Using yarn
+# Pomocí yarn
 yarn add @pabitel/core
 
-# Using npm
+# Pomocí npm
 npm install @pabitel/core
 ```
 
-## Basic Usage
+## Základní použití
 
-Here's a simple example that shows how to create a basic game:
+Zde je jednoduchý příklad, který ukazuje, jak vytvořit základní hru:
 
 ```typescript
 import { createGameEngine, defineScene, defineScenes, createSceneLoader } from '@pabitel/core';
 
-// Define your scenes
+// Definice scén
 const startScene = defineScene({
-    title: 'The Beginning',
-    content: 'You wake up in a small room. There is a door to the north and a window to the east.',
+    title: 'Začátek',
+    content: 'Probudíš se v malé místnosti. Na severu jsou dveře a na východě okno.',
     choices: [
         {
-            content: 'Go through the door',
+            content: 'Projít dveřmi',
             scene: 'corridor'
         },
         {
-            content: 'Look through the window',
+            content: 'Podívat se z okna',
             scene: 'window-view'
         }
     ]
 });
 
 const corridorScene = defineScene({
-    title: 'Dark Corridor',
-    content: 'You enter a long, dark corridor.',
+    title: 'Temná chodba',
+    content: 'Vstoupíš do dlouhé, temné chodby.',
     choices: [
         {
-            content: 'Go back to the room',
+            content: 'Vrátit se do místnosti',
             scene: 'start'
         }
     ]
 });
 
 const windowViewScene = defineScene({
-    title: 'Window View',
-    content: 'Through the window, you see a beautiful landscape.',
+    title: 'Pohled z okna',
+    content: 'Z okna vidíš krásnou krajinu.',
     choices: [
         {
-            content: 'Step back from the window',
+            content: 'Odstoupit od okna',
             scene: 'start'
         }
     ]
 });
 
-// Register scenes
+// Registrace scén
 const scenes = defineScenes({
     'start': startScene,
     'corridor': corridorScene,
     'window-view': windowViewScene
 });
 
-// Create the game engine
+// Vytvoření herního enginu
 const sceneLoader = createSceneLoader(scenes);
 const engine = createGameEngine({
     sceneLoader
 });
 
-// Start the game
+// Spuštění hry
 engine.start('start').then(() => {
-    console.log('Game started at scene:', engine.getCurrentScene()?.title);
+    console.log('Hra začala ve scéně:', engine.getCurrentScene()?.title);
     console.log(engine.getCurrentScene()?.content);
-    console.log('Available choices:');
+    console.log('Dostupné volby:');
     engine.getAvailableChoices().forEach((choice, index) => {
         console.log(`${index}. ${choice.content}`);
     });
 });
 ```
 
-## Core Concepts
+## Základní koncepty
 
-### Scenes and Choices
+### Scény a volby
 
-The basic building blocks of any game created with Pabitel Core are scenes and choices. A scene represents a single "page" or "screen" of your game, while choices are the options available to the player.
+Základními stavebními bloky každé hry vytvořené s Pabitel Core jsou scény a volby. Scéna představuje jednu "stránku" nebo "obrazovku" vaší hry, zatímco volby jsou možnosti dostupné hráči.
 
 ```typescript
 interface Scene {
@@ -120,12 +120,12 @@ interface Choice {
 }
 ```
 
-### Content Loaders and Keys
+### Content Loadery a klíče
 
-Pabitel Core uses a path-based key system for content identification, similar to file-based routing in modern web frameworks. This allows for intuitive organization of game content:
+Pabitel Core používá systém klíčů založený na cestách pro identifikaci obsahu, podobně jako funguje routování založené na souborech v moderních webových frameworcích. To umožňuje intuitivní organizaci herního obsahu:
 
 ```typescript
-// Scenes are identified by their keys, which can be path-like
+// Scény jsou identifikovány svými klíči, které mohou být podobné cestám
 const scenes = defineScenes({
   'forest/entrance': entranceScene,
   'forest/clearing': clearingScene,
@@ -133,9 +133,9 @@ const scenes = defineScenes({
 });
 ```
 
-### Game State
+### Herní stav
 
-The game state keeps track of everything that happens in your game, including variables, visited scenes, and any other data you want to track.
+Herní stav sleduje vše, co se děje ve vaší hře, včetně proměnných, navštívených scén a jakýchkoli dalších dat, která chcete sledovat.
 
 ```typescript
 interface GameState {
@@ -145,14 +145,14 @@ interface GameState {
 }
 ```
 
-### Effects
+### Efekty
 
-Effects are actions that change the game state. They can be triggered by choices, scenes, or other game events.
+Efekty jsou akce, které mění herní stav. Mohou být spuštěny volbami, scénami nebo jinými herními událostmi.
 
 ```typescript
-// Define a choice with effects
+// Definice volby s efekty
 {
-  content: 'Take the sword',
+  content: 'Vzít meč',
   scene: 'cave/entrance',
   effects: [
     { 
@@ -169,45 +169,45 @@ Effects are actions that change the game state. They can be triggered by choices
 }
 ```
 
-### Choices without scene transitions
+### Volby bez přechodů mezi scénami
 
-Choices don't always need to lead to a new scene. You can create choices that just apply effects while staying on the current scene:
+Volby nemusí vždy vést k nové scéně. Můžete vytvořit volby, které pouze aplikují efekty a zůstanou na aktuální scéně:
 
 ```typescript
 const forestScene = defineScene({
-  title: 'Forest',
-  content: 'You are in a dense forest...',
+  title: 'Les',
+  content: 'Jsi v hustém lese...',
   choices: [
     {
-      content: 'Search the area',
-      // No scene property - only effects
+      content: 'Prohledat okolí',
+      // Bez vlastnosti scene - pouze efekty
       effects: [
         { type: 'SET_VARIABLE', variable: 'foundMap', value: true }
       ]
     },
     {
-      content: 'Continue deeper',
+      content: 'Pokračovat hlouběji',
       scene: 'forest/clearing'
     }
   ]
 });
 ```
 
-### Plugins
+### Pluginy
 
-The plugin system allows you to extend the engine with custom functionality. Plugins can add new content types, effects, or other features.
+Systém pluginů umožňuje rozšířit engine o vlastní funkcionalitu. Pluginy mohou přidávat nové typy obsahu, efekty nebo jiné funkce.
 
 ```typescript
 import { AbstractPlugin } from '@pabitel/core';
 
-// Create a custom plugin
+// Vytvoření vlastního pluginu
 class InventoryPlugin extends AbstractPlugin {
     constructor() {
         super('inventory', {});
     }
 
     protected override setupLoaders() {
-        // Set up content loaders for items
+        // Nastavení content loaderů pro předměty
         const itemLoader = new GenericContentLoader();
         this.loaders.set('items', itemLoader);
     }
@@ -222,7 +222,7 @@ class InventoryPlugin extends AbstractPlugin {
     }
 }
 
-// Use the plugin
+// Použití pluginu
 const inventoryPlugin = new InventoryPlugin();
 const engine = createGameEngine({
     sceneLoader,
@@ -230,10 +230,123 @@ const engine = createGameEngine({
 });
 ```
 
-## Advanced Usage
+## Dostupné pluginy
 
-For more advanced usage, check out the examples directory and the documentation.
+Framework obsahuje několik oficiálních pluginů pro rozšíření základní funkcionality:
 
-## License
+### @pabitel/plugin-choices
+
+Plugin pro správu voleb, který poskytuje bohatší možnosti interakce ve hře.
+
+```typescript
+import { ChoicesPlugin } from '@pabitel/plugin-choices';
+
+const choicesPlugin = new ChoicesPlugin();
+engine.registerPlugin(choicesPlugin);
+```
+
+### @pabitel/plugin-commands
+
+Plugin pro implementaci textových příkazů, který umožňuje hráčům zadávat příkazy podobně jako v klasických textových adventurách.
+
+```typescript
+import { CommandPlugin } from '@pabitel/plugin-commands';
+
+const commandPlugin = new CommandPlugin();
+engine.registerPlugin(commandPlugin);
+```
+
+### @pabitel/plugin-local-storage
+
+Plugin pro ukládání herního stavu do localStorage prohlížeče.
+
+```typescript
+import { LocalStorageSaveStorage } from '@pabitel/plugin-local-storage';
+
+const saveStorage = new LocalStorageSaveStorage();
+const saveManager = createSaveManager(engine, { storage: saveStorage });
+```
+
+## Pokročilé použití
+
+Pabitel Core obsahuje další pokročilé funkce a možnosti:
+
+### Správa stavu
+
+Framework poskytuje pokročilé možnosti správy stavu:
+
+```typescript
+// Získání proměnné ze stavu
+const hasMap = engine.getStateManager().getVariable('hasMap', false);
+
+// Nastavení proměnné ve stavu
+engine.getStateManager().setVariable('hasMap', true);
+
+// Aktualizace celého stavu
+engine.getStateManager().updateState(state => {
+  state.variables.health -= 10;
+  state.variables.visitedPlaces.push('forest');
+});
+```
+
+### Systém událostí
+
+Můžete reagovat na různé události v enginu:
+
+```typescript
+// Naslouchání na změnu scény
+engine.on('sceneChanged', data => {
+  console.log('Přechod na novou scénu:', data.sceneKey);
+});
+
+// Naslouchání na změnu stavu
+engine.on('stateChanged', state => {
+  updateUI(state);
+});
+
+// Naslouchání na události pluginu
+engine.on('choices:choiceSelected', data => {
+  playSound('click');
+});
+```
+
+### Ukládání a načítání her
+
+Framework obsahuje vestavěný systém pro ukládání a načítání her:
+
+```typescript
+// Uložení hry
+await engine.saveGame('save_slot_1', { name: 'Uložení hry v lese' });
+
+// Načtení hry
+await engine.loadGame('save_slot_1');
+
+// Rychlé uložení/načtení
+await engine.getSaveManager().quickSave();
+await engine.getSaveManager().quickLoad();
+```
+
+### Entitní systém
+
+Pro složitější hry můžete využít entitní systém:
+
+```typescript
+// Vytvoření entity
+const playerEntity = engine.getEntityManager().createEntity('player', {
+  name: 'Hráč',
+  health: 100,
+  inventory: []
+});
+
+// Získání entity
+const player = engine.getEntityManager().getEntity('player');
+
+// Aktualizace entity
+engine.getEntityManager().updateEntity('player', entity => {
+  entity.health -= 10;
+});
+```
+
+## Licence
 
 MIT © Jakub Hájek

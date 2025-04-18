@@ -1,53 +1,91 @@
-import { GameState } from './types';
+import { GameState, StateMigrationFn, PersistedState } from './types';
+import { StateManager } from './StateManager';
 import lodashGet from 'lodash/get';
 import lodashSet from 'lodash/set';
 import lodashHas from 'lodash/has';
+import { produce } from '../utils/immer';
 
 /**
  * Získá hodnotu z herního stavu pomocí cesty (dot notation)
+ * @template T Typ očekávaného výstupu
+ * @param state Herní stav
+ * @param path Cesta k hodnotě (např. 'variables.player.health')
+ * @param defaultValue Výchozí hodnota, pokud cesta neexistuje
  */
-export function getStatePath<T>(state: GameState, path: string, defaultValue?: T): T | undefined {
+export function getStatePath<T>(state: GameState<any>, path: string, defaultValue?: T): T | undefined {
     return lodashGet(state, path, defaultValue);
 }
 
 /**
  * Nastaví hodnotu v herním stavu pomocí cesty (dot notation)
+ * @param state Herní stav
+ * @param path Cesta k hodnotě (např. 'variables.player.health')
+ * @param value Hodnota k nastavení
+ * @returns Nový herní stav
  */
-export function setStatePath(state: GameState, path: string, value: any): GameState {
-    lodashSet(state, path, value);
-    return state;
+export function setStatePath<T extends Record<string, unknown>>(
+    state: GameState<T>,
+    path: string,
+    value: any
+): GameState<T> {
+    return produce(state, draft => {
+        lodashSet(draft, path, value);
+    });
 }
 
 /**
  * Zkontroluje, zda cesta existuje v herním stavu
+ * @param state Herní stav
+ * @param path Cesta k kontrole
+ * @returns True pokud cesta existuje
  */
-export function hasStatePath(state: GameState, path: string): boolean {
+export function hasStatePath(state: GameState<any>, path: string): boolean {
     return lodashHas(state, path);
 }
 
 /**
  * Vytvoří snapshot stavu (hluboká kopie)
+ * @param state Herní stav
+ * @returns Kopie stavu
  */
-export function createStateSnapshot(state: GameState): GameState {
-    return JSON.parse(JSON.stringify({
+export function createStateSnapshot<T extends Record<string, unknown>>(state: GameState<T>): GameState<T> {
+    // Použijeme JSON.parse/stringify pro hluboké klonování
+    // Převedeme Set na pole a zpět
+    const serialized = JSON.stringify({
         ...state,
         visitedScenes: Array.from(state.visitedScenes)
-    }));
+    });
+
+    const parsed = JSON.parse(serialized);
+    return {
+        ...parsed,
+        visitedScenes: new Set(parsed.visitedScenes)
+    };
 }
 
 /**
  * Porovná dva stavy a vrátí rozdíly
+ * @param oldState Starý stav
+ * @param newState Nový stav
+ * @returns Objekt s rozdíly
  */
-export function compareStates(oldState: GameState, newState: GameState): Record<string, any> {
+export function compareStates<T extends Record<string, unknown>>(
+    oldState: GameState<T>,
+    newState: GameState<T>
+): Record<string, any> {
     const differences: Record<string, any> = {};
 
     // Porovnání visitedScenes
     const oldScenes = Array.from(oldState.visitedScenes);
     const newScenes = Array.from(newState.visitedScenes);
     const addedScenes = newScenes.filter(scene => !oldState.visitedScenes.has(scene));
+    const removedScenes = oldScenes.filter(scene => !newState.visitedScenes.has(scene));
 
-    if (addedScenes.length > 0) {
-        differences.visitedScenes = { added: addedScenes };
+    if (addedScenes.length > 0 || removedScenes.length > 0) {
+        differences.visitedScenes = {
+            added: addedScenes,
+            removed: removedScenes
+        };
     }
 
     // Porovnání variables
@@ -56,21 +94,19 @@ export function compareStates(oldState: GameState, newState: GameState): Record<
     const changedVars: Record<string, { old: any; new: any }> = {};
 
     // Kontrola změněných a přidaných proměnných
-    for (const key in newVars) {
-        if (!(key in oldVars) || oldVars[key] !== newVars[key]) {
+    const allKeys = new Set([...Object.keys(oldVars), ...Object.keys(newVars)]);
+
+    for (const key of allKeys) {
+        // Hluboké porovnání může být pomalé pro složité objekty
+        // Pro jednoduchost používáme JSON.stringify, ale v produkčním kódu
+        // by bylo lepší použít specializovanou knihovnu pro hluboké porovnání
+        const oldJson = JSON.stringify(oldVars[key]);
+        const newJson = JSON.stringify(newVars[key]);
+
+        if (oldJson !== newJson) {
             changedVars[key] = {
                 old: oldVars[key],
                 new: newVars[key]
-            };
-        }
-    }
-
-    // Kontrola odstraněných proměnných
-    for (const key in oldVars) {
-        if (!(key in newVars)) {
-            changedVars[key] = {
-                old: oldVars[key],
-                new: undefined
             };
         }
     }
@@ -80,9 +116,15 @@ export function compareStates(oldState: GameState, newState: GameState): Record<
     }
 
     // Porovnání ostatních vlastností (první úroveň)
+    const excludeKeys = ['visitedScenes', 'variables', '_metadata'];
+
     for (const key in newState) {
-        if (key !== 'visitedScenes' && key !== 'variables') {
-            if (!(key in oldState) || oldState[key] !== newState[key]) {
+        if (!excludeKeys.includes(key)) {
+            // Opět používáme JSON.stringify pro jednoduché hluboké porovnání
+            const oldJson = JSON.stringify(oldState[key]);
+            const newJson = JSON.stringify(newState[key]);
+
+            if (!(key in oldState) || oldJson !== newJson) {
                 differences[key] = {
                     old: oldState[key],
                     new: newState[key]
@@ -92,7 +134,7 @@ export function compareStates(oldState: GameState, newState: GameState): Record<
     }
 
     for (const key in oldState) {
-        if (key !== 'visitedScenes' && key !== 'variables' && !(key in newState)) {
+        if (!excludeKeys.includes(key) && !(key in newState)) {
             differences[key] = {
                 old: oldState[key],
                 new: undefined
@@ -105,8 +147,10 @@ export function compareStates(oldState: GameState, newState: GameState): Record<
 
 /**
  * Validuje herní stav
+ * @param state Herní stav
+ * @returns True pokud je stav validní
  */
-export function validateState(state: GameState): boolean {
+export function validateState<T extends Record<string, unknown>>(state: GameState<T>): boolean {
     if (!state) return false;
 
     // Kontrola základní struktury
@@ -134,4 +178,107 @@ export function validateState(state: GameState): boolean {
     }
 
     return true;
+}
+
+/**
+ * Vytvoří migrační funkci pro přejmenování proměnné
+ * @param variableName Původní název proměnné
+ * @param newVariableName Nový název proměnné
+ * @returns Migrační funkce
+ */
+export function createVariableRenameMigration(
+    variableName: string,
+    newVariableName: string
+): StateMigrationFn {
+    return (state, fromVersion, toVersion) => {
+        if (state.variables && variableName in state.variables) {
+            const newState = { ...state };
+            newState.variables = { ...state.variables };
+            newState.variables[newVariableName] = newState.variables[variableName];
+            delete newState.variables[variableName];
+
+            console.log(`Migrated variable '${variableName}' to '${newVariableName}'`);
+            return newState;
+        }
+        return state;
+    };
+}
+
+/**
+ * Vytvoří migrační funkci pro změnu struktury proměnné
+ * @param variableName Název proměnné
+ * @param transformFn Funkce pro transformaci hodnoty
+ * @returns Migrační funkce
+ */
+export function createVariableTransformMigration<T, U>(
+    variableName: string,
+    transformFn: (oldValue: T) => U
+): StateMigrationFn {
+    return (state, fromVersion, toVersion) => {
+        if (state.variables && variableName in state.variables) {
+            const newState = { ...state };
+            newState.variables = { ...state.variables };
+            newState.variables[variableName] = transformFn(newState.variables[variableName] as T);
+
+            console.log(`Transformed variable '${variableName}' during migration from v${fromVersion} to v${toVersion}`);
+            return newState;
+        }
+        return state;
+    };
+}
+
+/**
+ * Kombinuje více migračních funkcí do jedné
+ * @param migrations Pole migračních funkcí
+ * @returns Kombinovaná migrační funkce
+ */
+export function combineMigrations(...migrations: StateMigrationFn[]): StateMigrationFn {
+    return (state, fromVersion, toVersion) => {
+        return migrations.reduce((currentState, migration) => {
+            return migration(currentState, fromVersion, toVersion);
+        }, state);
+    };
+}
+
+/**
+ * Vytvoří migrační funkci pro přidání nové proměnné s výchozí hodnotou
+ * @param variableName Název nové proměnné
+ * @param defaultValue Výchozí hodnota
+ * @returns Migrační funkce
+ */
+export function createAddVariableMigration<T>(
+    variableName: string,
+    defaultValue: T
+): StateMigrationFn {
+    return (state, fromVersion, toVersion) => {
+        if (state.variables && !(variableName in state.variables)) {
+            const newState = { ...state };
+            newState.variables = { ...state.variables };
+            newState.variables[variableName] = defaultValue;
+
+            console.log(`Added new variable '${variableName}' during migration from v${fromVersion} to v${toVersion}`);
+            return newState;
+        }
+        return state;
+    };
+}
+
+/**
+ * Vytvoří migrační funkci pro změnu struktury celého stavu
+ * @param transformFn Funkce pro transformaci celého stavu
+ * @returns Migrační funkce
+ */
+export function createStateMigration(
+    transformFn: (state: PersistedState<unknown>) => PersistedState<unknown>
+): StateMigrationFn {
+    return (state, fromVersion, toVersion) => {
+        try {
+            const newState = transformFn(state);
+            console.log(`Applied custom state transformation during migration from v${fromVersion} to v${toVersion}`);
+            return newState;
+        } catch (error) {
+            console.error('Error during state migration:', error);
+            return state;
+        }
+    };
 }

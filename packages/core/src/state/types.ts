@@ -22,12 +22,12 @@ export interface GameState<T extends Record<string, unknown> = Record<string, un
 }
 
 /**
- * Klíč pro perzistentní vlastnosti ve stavu - pouze pro interní použití
+ * Klíč pro perzistentní vlastnosti ve stavu - pro dokumentaci/API reference, ne interně
  */
-export const PERSISTENT_KEYS_KEY = '__persistentKeys';
+export const PERSISTENT_KEYS_KEY = '__persistentKeys'; // Konstanta zůstává pro referenci
 
 /**
- * Výchozí perzistentní klíče
+ * Výchozí perzistentní klíče, které by měly být vždy ukládány
  */
 export const DEFAULT_PERSISTENT_KEYS = ['visitedScenes', 'variables'];
 
@@ -39,10 +39,10 @@ export const DEFAULT_PERSISTENT_KEYS = ['visitedScenes', 'variables'];
 export type StateUpdater<T extends Record<string, unknown> = Record<string, unknown>> = (state: GameState<T>) => void;
 
 /**
- * Možnosti pro vytvoření StateManager
+ * Možnosti pro vytvoření GameStateManager
  * @template T Typ proměnných ve stavu
  */
-export interface StateManagerOptions<T extends Record<string, unknown> = Record<string, unknown>> {
+export interface GameStateManagerOptions<T extends Record<string, unknown> = Record<string, unknown>> {
     /**
      * Počáteční stav, který bude sloučen s výchozím prázdným stavem
      */
@@ -50,59 +50,22 @@ export interface StateManagerOptions<T extends Record<string, unknown> = Record<
 
     /**
      * Seznam klíčů, které budou persistovány při serializaci
+     * Pokud není uveden, použijí se DEFAULT_PERSISTENT_KEYS
      */
     persistentKeys?: string[];
 
     /**
-     * Callback volaný před serializací stavu
+     * Callback volaný PŘED serializací stavu.
+     * Tuto funkcionalitu by měl primárně implementovat SaveManager nebo PersistenceService,
+     * ale je zde ponechána pro možnost, aby GameStateManager mohl provést přípravu.
      */
     onBeforeSerialize?: (state: GameState<T>) => void;
 
     /**
-     * Callback volaný po deserializaci stavu
+     * Callback volaný PO deserializaci stavu a jeho aplikaci na GameStateManager.
+     * Stejně jako onBeforeSerialize, primárně patří do persistence vrstvy.
      */
     onAfterDeserialize?: (state: GameState<T>) => void;
-}
-
-/**
- * Možnosti pro serializaci stavu
- */
-export interface SerializationOptions {
-    /**
-     * Zda zahrnout metadata o stavu (např. verzi enginu)
-     * Výchozí: true
-     */
-    includeMetadata?: boolean;
-
-    /**
-     * Vlastní replacer funkce pro JSON.stringify
-     */
-    replacer?: (key: string, value: any) => any;
-
-    /**
-     * Další volby specifické pro implementaci
-     */
-    [key: string]: any;
-}
-
-/**
- * Metadata o stavu
- */
-export interface StateMetadata {
-    /**
-     * Verze formátu stavu
-     */
-    version: number;
-
-    /**
-     * Časové razítko vytvoření
-     */
-    timestamp: number;
-
-    /**
-     * Další metadata
-     */
-    [key: string]: any;
 }
 
 /**
@@ -110,7 +73,7 @@ export interface StateMetadata {
  */
 export interface StateChangedEvent<T extends Record<string, unknown> = Record<string, unknown>> {
     /**
-     * Předchozí stav
+     * Předchozí stav (null při deserializaci)
      */
     previousState: GameState<T> | null;
 
@@ -120,45 +83,15 @@ export interface StateChangedEvent<T extends Record<string, unknown> = Record<st
     newState: GameState<T>;
 
     /**
-     * Zdroj změny (např. 'effect', 'scene', 'plugin', atd.)
+     * Zdroj změny (např. 'effect', 'scene', 'plugin', 'deserialize', 'reset', atd.)
      */
     source?: string;
 }
 
 /**
- * Typ pro migrační funkci
+ * Eventy emitované GameStateManagerem (runtime události)
  */
-export type StateMigrationFn = (state: PersistedState<unknown>, fromVersion: number, toVersion: number) => PersistedState<unknown>;
-
-/**
- * Typ pro persistovanou část stavu (při serializaci/deserializaci)
- */
-export interface PersistedState<T extends Record<string, unknown> = Record<string, unknown>> {
-    /**
-     * Navštívené scény - konvertované na pole pro JSON serializaci
-     */
-    visitedScenes: string[];
-
-    /**
-     * Herní proměnné
-     */
-    variables: T;
-
-    /**
-     * Metadata stavu
-     */
-    _metadata?: StateMetadata;
-
-    /**
-     * Další persistované vlastnosti
-     */
-    [key: string]: unknown;
-}
-
-/**
- * Eventy emitované StateManagerem
- */
-export interface StateManagerEvents<T extends Record<string, unknown> = Record<string, unknown>> {
+export interface GameStateManagerEvents<T extends Record<string, unknown> = Record<string, unknown>> {
     /**
      * Emitováno při změně stavu
      */
@@ -169,22 +102,8 @@ export interface StateManagerEvents<T extends Record<string, unknown> = Record<s
      */
     persistentKeysChanged: { keys: string[] };
 
-    /**
-     * Emitováno po aplikaci migrace
-     */
-    migrationApplied: {
-        fromVersion: number;
-        toVersion: number;
-        state: PersistedState<T>;
-    };
-
-    /**
-     * Emitováno před serializací stavu
-     */
-    beforeSerialize: { state: GameState<T> };
-
-    /**
-     * Emitováno po deserializaci stavu
-     */
-    afterDeserialize: { state: GameState<T> };
+    // Události související s persistencí (jako beforeSerialize/afterDeserialize/migrationApplied)
+    // by se nyní měly emitovat z StatePersistenceService nebo StateMigrationService,
+    // jak je definováno v src/state/persistence/types.ts.
+    // GameStateManager na ně může volitelně naslouchat, pokud je to potřeba.
 }

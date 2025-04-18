@@ -1,5 +1,5 @@
 import { Scene } from '../scene/types';
-import { StateManager } from '../state/StateManager';
+import { GameStateManager } from '../state/GameStateManager';
 import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
 import { LoaderRegistry } from '../content/LoaderRegistry';

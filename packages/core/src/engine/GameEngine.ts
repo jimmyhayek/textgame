@@ -10,7 +10,7 @@ import { GameState } from '../state/types';
 import { Scene, SceneKey, SceneTransitionOptions } from '../scene/types';
 import { Effect } from '../effect/types';
 import { EventEmitter } from '../event';
-import { StateManager } from '../state';
+import { GameStateManager } from '../state';
 import { SceneManager } from '../scene/SceneManager';
 import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
@@ -36,7 +36,7 @@ export class GameEngine {
     private readonly eventEmitter: EventEmitter;
 
     /** Správce stavu */
-    private readonly stateManager: StateManager;
+    private readonly stateManager: GameStateManager;
 
     /** Správce scén */
     private readonly sceneManager: SceneManager;
@@ -75,7 +75,7 @@ export class GameEngine {
         this.eventEmitter = options.eventEmitter || new EventEmitter();
 
         // Vytvoření správce stavu
-        this.stateManager = new StateManager({
+        this.stateManager = new GameStateManager({
             initialState
         });
 
@@ -390,7 +390,7 @@ export class GameEngine {
      *
      * @returns Správce stavu
      */
-    public getStateManager(): StateManager {
+    public getStateManager(): GameStateManager {
         return this.stateManager;
     }
 

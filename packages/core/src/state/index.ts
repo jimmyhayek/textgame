@@ -1,15 +1,12 @@
-// Export typů
+// Export runtime typů
 export * from './types';
 
-// Export hlavních tříd
-export { StateManager } from './StateManager';
+// Export hlavního runtime správce stavu
+export { GameStateManager } from './GameStateManager';
 
-// Export utilit
-export {
-    getStatePath,
-    setStatePath,
-    hasStatePath,
-    createStateSnapshot,
-    compareStates,
-    validateState
-} from './utils';
+// Export obecných runtime utilit pro stav
+export * from './utils';
+
+// Export všeho z persistence podsložky
+// Tím se persistence služby a typy stávají součástí veřejného API modulu 'state'
+export * from './persistence';

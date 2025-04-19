@@ -1,4 +1,5 @@
 import { ContentRegistry, ContentDefinition } from './types';
+import { Scene } from '../scene';
 import { GenericContentLoader } from './GenericContentLoader';
 
 /**
@@ -30,6 +31,16 @@ export function defineContent<T extends object>( // Omezení T extends object
     return { type, content: contentRegistry };
 }
 
+/**
+ * Zjednodušená utilita pro definování registru scén.
+ * Automaticky nastavuje typ obsahu na 'scenes'.
+ * @param registry Objekt mapující klíče scén (string) na objekty Scene nebo funkce pro lazy-loading.
+ * @returns Objekt ContentDefinition<Scene> připravený pro registraci v enginu.
+ */
+export function defineScenes(registry: ContentRegistry<Scene>): ContentDefinition<Scene> {
+    // Interně volá generickou funkci defineContent s předvyplněným typem
+    return defineContent<Scene>('scenes', registry);
+}
 
 /**
  * Spojí více registrů obsahu do jednoho

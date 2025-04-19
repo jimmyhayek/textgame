@@ -64,13 +64,9 @@ src/
   event/
     EventEmitter.ts
     index.ts
-    TypedEventEmmitter.ts
+    TypedEventEmitter.ts
     types.ts
     utils.ts
-  loaders/
-    GenericContentLoader.ts
-    index.ts
-    LoaderRegistry.ts
   plugin/
     AbstractPlugin.ts
     index.ts
@@ -125,7 +121,25 @@ This section contains the contents of the repository's files.
 
 <file path="src/content/GenericContentLoader.ts">
 import { produce } from '../utils/immer';
-import { ContentRegistry, ContentLoaderOptions } from './types';
+
+/**
+ * Interface pro definování content registry s lazy-loading podporou
+ * @template T Typ načítaného obsahu
+ * @template K Typ identifikátoru obsahu (obvykle string)
+ */
+export interface ContentRegistry<T, K extends string = string> {
+    [key: string]: T | (() => Promise<T | { default: T }>);
+}
+
+/**
+ * Konfigurační možnosti pro content loader
+ * @template T Typ načítaného obsahu
+ * @template K Typ identifikátoru obsahu (obvykle string)
+ */
+export interface ContentLoaderOptions<T extends object, K extends string = string> {
+    /** Počáteční registry obsahu */
+    initialRegistry?: ContentRegistry<T, K>;
+}
 
 /**
  * Generický loader pro herní obsah s podporou lazy-loadingu
@@ -199,7 +213,83 @@ export class GenericContentLoader<T extends object, K extends string = string> {
             const loadFunction = contentDefOrImport as () => Promise<T | { default: T }>;
             loadPromise = loadFunction().then((module): T => {
                 // Kontrola, zda máme default export (ES module) nebo přímý obsah
-                const content = this.isMo
+                const content = this.isModuleWithDefault(module) ? module.default : module;
+
+                // Přidáme _key do načteného obsahu
+                const enhancedContent = typeof content === 'object' && content !== null
+                    ? { ...content, _key: key }
+                    : content;
+
+                this.loadedContent.set(key, enhancedContent);
+                return enhancedContent;
+            });
+        } else {
+            // Zpracování přímého obsahu
+            const content = typeof contentDefOrImport === 'object' && contentDefOrImport !== null
+                ? { ...contentDefOrImport, _key: key }
+                : contentDefOrImport;
+
+            loadPromise = Promise.resolve(content);
+            this.loadedContent.set(key, content);
+        }
+
+        this.loadingPromises.set(key, loadPromise);
+        return loadPromise;
+    }
+
+    /**
+     * Kontroluje, zda obsah s daným klíčem existuje v registry
+     * @param key Klíč obsahu
+     * @returns True pokud obsah existuje, false jinak
+     */
+    public hasContent(key: string): boolean {
+        return key in this.registry;
+    }
+
+    /**
+     * Získá všechny klíče obsahu registrované v loaderu
+     * @returns Pole klíčů obsahu
+     */
+    public getContentKeys(): string[] {
+        return Object.keys(this.registry);
+    }
+
+    /**
+     * Předem načte obsah podle klíčů
+     * @param keys Volitelné pole klíčů obsahu k načtení, načte veškerý obsah pokud není uvedeno
+     * @returns Promise, který se vyřeší, když je veškerý obsah načten
+     */
+    public async preloadContent(keys?: string[]): Promise<void> {
+        const keysToLoad: string[] = keys || this.getContentKeys();
+        await Promise.all(keysToLoad.map(key => this.loadContent(key)));
+    }
+
+    /**
+     * Získá podkladový registry obsahu
+     * @returns Aktuální registry obsahu
+     */
+    public getRegistry(): ContentRegistry<T, K> {
+        return this.registry;
+    }
+
+    /**
+     * Vyčistí cache a načte veškerý obsah znovu při příštím požadavku
+     */
+    public clearCache(): void {
+        this.loadedContent.clear();
+        this.loadingPromises.clear();
+    }
+
+    /**
+     * Type guard pro kontrolu, zda objekt má default export
+     * @param obj Objekt ke kontrole
+     * @returns True pokud objekt má default vlastnost typu T
+     * @private
+     */
+    private isModuleWithDefault(obj: any): obj is { default: T } {
+        return obj && typeof obj === 'object' && 'default' in obj;
+    }
+}
 </file>
 
 <file path="src/content/index.ts">
@@ -225,18 +315,18 @@ export {
 import { GenericContentLoader } from './GenericContentLoader';
 
 /**
- * Registry pro správu multiple content loaderů
- * Poskytuje centrální bod pro registraci a přístup k loaderům pro různé typy obsahu
+ * Registry for managing multiple content loaders
+ * Provides a central point for registering and accessing loaders for different content types
  */
 export class LoaderRegistry {
-    /** Mapa loaderů organizovaná podle typu */
+    /** Map of loaders organized by type */
     private loaders: Map<string, GenericContentLoader<any, any>> = new Map();
 
     /**
-     * Registruje loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @param loader Instance loaderu pro daný typ obsahu
-     * @returns Instance registru pro řetězení
+     * Registers a loader for a specific content type
+     * @param type Content type identifier
+     * @param loader Loader instance for the content type
+     * @returns This registry instance for chaining
      */
     public registerLoader<T extends object, K extends string = string>(
         type: string,
@@ -247,11 +337,11 @@ export class LoaderRegistry {
     }
 
     /**
-     * Získá loader pro specifický typ obsahu
-     * @template T Typ obsahu
-     * @template K Typ klíče obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns Instance loaderu pro daný typ obsahu nebo undefined pokud nenalezen
+     * Gets a loader for a specific content type
+     * @template T Content type
+     * @template K Content ID type
+     * @param type Content type identifier
+     * @returns Loader instance for the content type or undefined if not found
      */
     public getLoader<T extends object, K extends string = string>(
         type: string
@@ -260,59 +350,54 @@ export class LoaderRegistry {
     }
 
     /**
-     * Kontroluje, zda existuje loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns True pokud loader existuje, false jinak
+     * Checks if a loader for a specific content type exists
+     * @param type Content type identifier
+     * @returns True if loader exists, false otherwise
      */
     public hasLoader(type: string): boolean {
         return this.loaders.has(type);
     }
 
     /**
-     * Získá všechny registrované typy obsahu
-     * @returns Pole identifikátorů typů obsahu
+     * Gets all registered content types
+     * @returns Array of content type identifiers
      */
     public getContentTypes(): string[] {
         return Array.from(this.loaders.keys());
     }
 
     /**
-     * Odstraní loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns True pokud byl loader odstraněn, false pokud neexistoval
+     * Removes a loader for a specific content type
+     * @param type Content type identifier
+     * @returns True if loader was removed, false if it didn't exist
      */
     public removeLoader(type: string): boolean {
         return this.loaders.delete(type);
     }
-
-    /**
-     * Načte obsah specifického typu podle klíče
-     * @template T Typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @param key Klíč obsahu
-     * @returns Promise s načteným obsahem
-     * @throws Error pokud typ obsahu není registrován nebo obsah neexistuje
-     */
-    public async loadContent<T extends object>(type: string, key: string): Promise<T> {
-        const loader = this.getLoader<T>(type);
-        if (!loader) {
-            throw new Error(`No loader registered for content type '${type}'`);
-        }
-
-        return await loader.loa
+}
 </file>
 
 <file path="src/content/types.ts">
 /**
- * Obecné rozhraní pro definici obsahu
- * @template T Typ obsahu
+ * Registry obsahu s podporou lazy-loadingu
+ * @template T Typ obsahu (hodnoty v registru)
+ * @template K Typ klíče obsahu
  */
-export interface ContentDefinition<T> {
-    /** Identifikátor typu obsahu */
+export type ContentRegistry<T extends object, K extends string = string> = {
+    [key: string]: T | (() => Promise<T | { default: T }>);
+};
+
+/**
+ * Obecné rozhraní pro definici obsahu k registraci
+ * @template T Typ HODNOTY v registru (např. Scene, Item)
+ */
+export interface ContentDefinition<T extends object> { // Přidáno omezení T extends object
+    /** Identifikátor typu obsahu (např. 'scenes', 'items') */
     type: string;
-    /** Definice obsahu */
-    content: T;
+    /** Registry obsahu pro daný typ */
+    content: ContentRegistry<T>; // <--- Změna zde: content je nyní typu ContentRegistry<T>
 }
+
 
 /**
  * Funkce pro načtení obsahu podle ID
@@ -326,15 +411,6 @@ export type ContentLoader<T, ID = string> = (id: ID) => Promise<T>;
  * @template ID Typ identifikátoru obsahu
  */
 export type ContentChecker<ID = string> = (id: ID) => boolean;
-
-/**
- * Registry obsahu s podporou lazy-loadingu
- * @template T Typ obsahu
- * @template K Typ klíče obsahu
- */
-export type ContentRegistry<T extends object, K extends string = string> = {
-    [key: string]: T | (() => Promise<T | { default: T }>);
-};
 
 /**
  * Možnosti pro vytvoření content loaderu
@@ -392,17 +468,18 @@ export function createContentLoader<T extends object, K extends string = string>
 
 /**
  * Vytvoří definici obsahu pro registraci s engine
- * @template T Typ obsahu
+ * @template T Typ obsahu (hodnoty v registru)
  * @param type Identifikátor typu obsahu
- * @param content Registry obsahu
+ * @param contentRegistry Registry obsahu
  * @returns Definice obsahu připravená k registraci
  */
-export function defineContent<T extends ContentRegistry<any, any>>(
+export function defineContent<T extends object>( // Omezení T extends object
     type: string,
-    content: T
-): ContentDefinition<T> {
-    return { type, content };
+    contentRegistry: ContentRegistry<T> // Přijímá přímo ContentRegistry<T>
+): ContentDefinition<T> { // Vrací správný typ
+    return { type, content: contentRegistry };
 }
+
 
 /**
  * Spojí více registrů obsahu do jednoho
@@ -464,10 +541,9 @@ export function mapContentRegistry<T extends object, U extends object, K extends
             // Pro lazy-loaded obsah
             result[key] = async () => {
                 const loadedContent = await (value as Function)();
-                if ('default' in loadedContent) {
-                    return { default: mapFn(loadedContent.default, key) };
-                }
-                return mapFn(loadedContent as T, key);
+                // Handle default export from ES modules
+                const actualContent = ('default' in loadedContent) ? loadedContent.default : loadedContent;
+                return mapFn(actualContent as T, key);
             };
         } else {
             // Pro okamžitý obsah
@@ -480,7 +556,7 @@ export function mapContentRegistry<T extends object, U extends object, K extends
 </file>
 
 <file path="src/effect/EffectManager.ts">
-import { GameState } from '../state/types';
+import { GameState } from '../state';
 import { Effect, EffectProcessor, EffectType, BuiltInEffectType } from './types';
 import { produce } from '../utils/immer';
 import { createDefaultEffectProcessors } from './processors';
@@ -1398,69 +1474,49 @@ export function isEffectFromNamespace(effect: Effect, namespace: string): boolea
 </file>
 
 <file path="src/engine/GameEngine.ts">
+// Importuj správně typy a enumy
 import {
     GameEngineOptions,
-    GameEngineEvents,
+    GameEngineCoreEvents, // Použij přejmenovaný enum
     GameStartedEventData,
     GameEndedEventData,
     SceneChangedEventData,
-    EffectAppliedEventData
+    EffectAppliedEventData,
+    EngineEventMap, // Import sjednocené mapy
+    EngineCoreEventMap // Import mapy pro core události
 } from './types';
-import { GameState } from '../state/types';
+import { GameState, GameStateManagerEvents } from '../state/types'; // GameStateManagerEvents z state/types
 import { Scene, SceneKey, SceneTransitionOptions } from '../scene/types';
 import { Effect } from '../effect/types';
-import { EventEmitter } from '../event';
-import { GameStateManager } from '../state';
+import { EventEmitter } from '../event/EventEmitter';
+import { TypedEventEmitter } from '../event/TypedEventEmitter'; // Zkontroluj název souboru!
+import { GameStateManager } from '../state'; // GameStateManager z state/index
 import { SceneManager } from '../scene/SceneManager';
 import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
 import { GenericContentLoader } from '../content/GenericContentLoader';
 import { LoaderRegistry } from '../content/LoaderRegistry';
-import { SaveManager } from '../save/SaveManager';
-import { ContentDefinition } from '../content/types';
-import { Plugin } from '../plugin/types';
+import { SaveManager, SaveEvents, SaveEventMap } from '../save'; // SaveEventMap ze save/index
+import { ContentDefinition, ContentRegistry } from '../content/types';
+import { Plugin, PluginEvents, PluginEventMap } from '../plugin/types'; // PluginEventMap z plugin/types
 import { createSaveManager } from '../save/utils';
-import { GameEventType, EventListener } from '../event/types';
+import { GameEventType, EventListener } from '../event/types'; // Import z event/types
+import { StateManagerPersistenceEvents, PersistedState } from '../state/persistence/types';
 
 /**
  * Hlavní třída herního enginu
- *
- * Koordinuje všechny komponenty enginu, spravuje stav hry a přechody
- * mezi scénami, a poskytuje rozhraní pro interakci s herním světem.
  */
 export class GameEngine {
-    /** Verze enginu */
     private readonly version: string;
-
-    /** Event emitter pro události */
     private readonly eventEmitter: EventEmitter;
-
-    /** Správce stavu */
     private readonly stateManager: GameStateManager;
-
-    /** Správce scén */
     private readonly sceneManager: SceneManager;
-
-    /** Správce efektů */
     private readonly effectManager: EffectManager;
-
-    /** Správce pluginů */
     private readonly pluginManager: PluginManager;
-
-    /** Registr loaderů obsahu */
     private readonly loaderRegistry: LoaderRegistry;
-
-    /** Správce ukládání a načítání */
     private readonly saveManager: SaveManager;
-
-    /** Příznak, zda je hra spuštěna */
     private isRunning: boolean = false;
 
-    /**
-     * Vytvoří novou instanci herního enginu
-     *
-     * @param options Možnosti konfigurace
-     */
     constructor(options: GameEngineOptions) {
         const {
             sceneLoader,
@@ -1470,72 +1526,91 @@ export class GameEngine {
         } = options;
 
         this.version = engineVersion;
-
-        // Vytvoření nebo převzetí event emitteru
         this.eventEmitter = options.eventEmitter || new EventEmitter();
 
-        // Vytvoření správce stavu
-        this.stateManager = new GameStateManager({
-            initialState
+        // GameStateManager nyní přijímá engine
+        this.stateManager = new GameStateManager(this, {
+            initialState,
+            persistentKeys: options.persistentKeys, // Předání persistentKeys
+            onBeforeSerialize: options.onBeforeSerialize, // Předání callbacků
+            onAfterDeserialize: options.onAfterDeserialize
         });
 
-        // Vytvoření registru loaderů obsahu
         this.loaderRegistry = new LoaderRegistry();
-
-        // Vytvoření správce efektů
-        this.effectManager = new EffectManager();
-
-        // Registrace loaderu scén
+        this.effectManager = new EffectManager({ registerDefaultEffects: options.registerDefaultEffects ?? true });
         this.loaderRegistry.registerLoader('scenes', sceneLoader);
-
-        // Vytvoření správce scén
         this.sceneManager = new SceneManager(sceneLoader);
 
-        // Vytvoření správce pluginů
         this.pluginManager = new PluginManager(this, this.eventEmitter, {
-            autoActivate: true
+            autoActivate: options.autoActivatePlugins ?? true,
+            allowOverride: options.allowPluginOverride ?? false
         });
 
-        // Vytvoření nebo převzetí správce ukládání
         if (options.saveManager) {
             this.saveManager = options.saveManager;
         } else {
             this.saveManager = createSaveManager(this, {
                 storage: options.saveStorage,
-                engineVersion: this.version
+                engineVersion: this.version,
+                storagePrefix: options.storagePrefix,
+                enableAutoSave: options.enableAutoSave,
+                autoSaveInterval: options.autoSaveInterval,
+                autoSaveSlots: options.autoSaveSlots,
+                storageType: options.storageType
             });
         }
 
-        // Inicializace pluginů
-        this.initializePlugins(plugins)
+        this.initializePlugins(plugins); // Tato metoda je async
     }
 
-    /**
-     * Inicializuje pluginy
-     *
-     * @param plugins Pole pluginů k inicializaci
-     * @private
-     */
     private async initializePlugins(plugins: Plugin[]): Promise<void> {
         for (const plugin of plugins) {
-            await this.pluginManager.registerPlugin(plugin);
+            // Ošetření chyby při registraci pluginu
+            try {
+                await this.pluginManager.registerPlugin(plugin);
+            } catch (error) {
+                console.error(`Failed to register or activate plugin '${plugin.name}':`, error);
+                // Emituj engine error
+                this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                    message: `Plugin registration/activation failed: ${plugin.name}`,
+                    error,
+                    context: 'pluginInitialization'
+                });
+            }
         }
     }
 
-    /**
-     * Spustí hru od zadané scény
-     *
-     * @param initialSceneKey Klíč počáteční scény
-     * @param options Volitelné možnosti přechodu
-     * @returns Promise, který se vyřeší, když je hra spuštěna
-     */
+    // --- Typed Emitter Getters ---
+    // Vrací typovaný emitter pro všechny události procházející enginem
+    public getTypedEventEmitter(): TypedEventEmitter<EngineEventMap> {
+        return new TypedEventEmitter<EngineEventMap>(this.eventEmitter);
+    }
+    // Specifické gettery pro jednotlivé mapy událostí
+    public getCoreEventEmitter(): TypedEventEmitter<EngineCoreEventMap> {
+        return new TypedEventEmitter<EngineCoreEventMap>(this.eventEmitter);
+    }
+    public getPluginEventEmitter(): TypedEventEmitter<PluginEventMap> {
+        return new TypedEventEmitter<PluginEventMap>(this.eventEmitter);
+    }
+    public getSaveEventEmitter(): TypedEventEmitter<SaveEventMap> {
+        return new TypedEventEmitter<SaveEventMap>(this.eventEmitter);
+    }
+    public getStateManagerEventEmitter<T extends Record<string, unknown>>(): TypedEventEmitter<GameStateManagerEvents<T>> {
+        return new TypedEventEmitter<GameStateManagerEvents<T>>(this.eventEmitter);
+    }
+    public getPersistenceEventEmitter<T extends Record<string, unknown>>(): TypedEventEmitter<StateManagerPersistenceEvents<T>> {
+        return new TypedEventEmitter<StateManagerPersistenceEvents<T>>(this.eventEmitter);
+    }
+    public getGenericEventEmitter(): EventEmitter {
+        return this.eventEmitter;
+    }
+    // ---
+
     public async start(initialSceneKey: SceneKey, options?: SceneTransitionOptions): Promise<boolean> {
-        // Aplikace efektů, pokud existují
         if (options?.effects && options.effects.length > 0) {
             this.applyEffects(options.effects);
         }
 
-        // Přechod na počáteční scénu
         const success = await this.sceneManager.transitionToScene(
             initialSceneKey,
             this.stateManager.getState(),
@@ -1544,53 +1619,38 @@ export class GameEngine {
 
         if (success) {
             this.isRunning = true;
-
-            // Emitování události startu hry
-            this.eventEmitter.emit(GameEngineEvents.GAME_STARTED, {
+            const startEventData: GameStartedEventData = {
                 sceneKey: initialSceneKey,
                 transitionData: options?.data
-            } as GameStartedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.GAME_STARTED, startEventData);
 
-            // Emitování události změny scény
-            this.eventEmitter.emit(GameEngineEvents.SCENE_CHANGED, {
-                scene: this.sceneManager.getCurrentScene(),
+            const sceneChangeEventData: SceneChangedEventData = {
+                scene: this.sceneManager.getCurrentScene()!,
                 sceneKey: initialSceneKey,
                 transitionData: options?.data
-            } as SceneChangedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.SCENE_CHANGED, sceneChangeEventData);
         } else {
             console.error(`Failed to start game at scene '${initialSceneKey}'`);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to start game at scene '${initialSceneKey}'`,
+                context: 'startGame'
+            });
         }
-
         return success;
     }
 
-    /**
-     * Ukončí běžící hru
-     *
-     * @param reason Volitelný důvod ukončení
-     * @param data Volitelná dodatečná data
-     */
     public end(reason?: string, data: Record<string, any> = {}): void {
-        if (!this.isRunning) {
-            return;
-        }
-
+        if (!this.isRunning) return;
         this.isRunning = false;
-
-        // Emitování události konce hry
-        this.eventEmitter.emit(GameEngineEvents.GAME_ENDED, {
-            reason,
-            ...data
-        } as GameEndedEventData);
+        const eventData: GameEndedEventData = { reason, ...data };
+        // Použij core emitter
+        this.getCoreEventEmitter().emit(GameEngineCoreEvents.GAME_ENDED, eventData);
     }
 
-    /**
-     * Přesune hru na novou scénu
-     *
-     * @param sceneKey Klíč cílové scény
-     * @param options Volitelné možnosti přechodu
-     * @returns Promise, který se vyřeší, když je přechod dokončen
-     */
     public async transitionToScene(
         sceneKey: SceneKey,
         options?: SceneTransitionOptions
@@ -1599,16 +1659,13 @@ export class GameEngine {
             console.warn('Cannot transition: game is not running. Call start() first.');
             return false;
         }
-
         const previousSceneKey = this.sceneManager.getCurrentSceneKey();
         const previousScene = this.sceneManager.getCurrentScene();
 
-        // Aplikace efektů, pokud existují
         if (options?.effects && options.effects.length > 0) {
             this.applyEffects(options.effects);
         }
 
-        // Provedení přechodu
         const success = await this.sceneManager.transitionToScene(
             sceneKey,
             this.stateManager.getState(),
@@ -1616,316 +1673,141 @@ export class GameEngine {
         );
 
         if (success) {
-            // Emitování události změny scény
-            this.eventEmitter.emit(GameEngineEvents.SCENE_CHANGED, {
-                scene: this.sceneManager.getCurrentScene(),
+            const eventData: SceneChangedEventData = {
+                scene: this.sceneManager.getCurrentScene()!,
                 sceneKey,
-                previousScene,
-                previousSceneKey,
+                previousScene: previousScene ?? undefined,
+                previousSceneKey: previousSceneKey ?? undefined,
                 transitionData: options?.data
-            } as SceneChangedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.SCENE_CHANGED, eventData);
+        } else {
+            console.error(`Failed to transition to scene '${sceneKey}'`);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to transition to scene '${sceneKey}'`,
+                context: 'transitionScene'
+            });
         }
-
         return success;
     }
 
-    /**
-     * Aplikuje efekty na herní stav
-     *
-     * @param effects Efekty k aplikaci
-     */
     public applyEffects(effects: Effect[]): void {
         if (!effects || effects.length === 0) return;
 
         const currentState = this.stateManager.getState();
-        const newState = this.effectManager.applyEffects(effects, currentState);
+        let newState = currentState; // Inicializace pro případ chyby
+        try {
+            // Předpokládáme, že EffectManager může pracovat s draftem nebo vrátí nový stav
+            this.stateManager.updateState(draftState => {
+                // Zde EffectManager *musí* modifikovat draft, pokud má být změna efektivní v rámci jednoho updateState
+                // Pokud EffectManager vrací nový stav, logika by byla jiná (méně efektivní s Immer)
+                this.effectManager.applyEffects(effects, draftState); // Předpokládáme, že toto modifikuje draftState
+            }, 'applyEffects');
 
-        this.stateManager.setState(newState);
+            newState = this.stateManager.getState(); // Získání nového stavu po úspěšné aktualizaci
 
-        // Emitování události změny stavu
-        this.eventEmitter.emit(GameEngineEvents.STATE_CHANGED, newState);
+            const eventData: EffectAppliedEventData = {
+                effect: effects.length === 1 ? effects[0] : { type: 'batch', effects },
+                previousState: currentState,
+                newState
+            };
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.EFFECT_APPLIED, eventData);
 
-        // Emitování události aplikace efektů
-        this.eventEmitter.emit(GameEngineEvents.EFFECT_APPLIED, {
-            effect: effects.length === 1 ? effects[0] : { type: 'batch', effects },
-            previousState: currentState,
-            newState
-        } as EffectAppliedEventData);
+        } catch (error) {
+            console.error("Error applying effects:", error);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Error applying effects`,
+                error,
+                context: 'applyEffects'
+            });
+            // Stav zůstane 'currentState', protože updateState selhal nebo nebyl dokončen
+        }
     }
 
-    /**
-     * Aplikuje jeden efekt na herní stav
-     *
-     * @param effect Efekt k aplikaci
-     */
     public applyEffect(effect: Effect): void {
         if (!effect) return;
-
-        const currentState = this.stateManager.getState();
-        const newState = this.effectManager.applyEffect(effect, currentState);
-
-        this.stateManager.setState(newState);
-
-        // Emitování události změny stavu
-        this.eventEmitter.emit(GameEngineEvents.STATE_CHANGED, newState);
-
-        // Emitování události aplikace efektu
-        this.eventEmitter.emit(GameEngineEvents.EFFECT_APPLIED, {
-            effect,
-            previousState: currentState,
-            newState
-        } as EffectAppliedEventData);
+        this.applyEffects([effect]);
     }
 
-    /**
-     * Registruje obsah s příslušným loaderem
-     *
-     * @param contentDefinition Definice obsahu
-     * @returns True, pokud byla registrace úspěšná
-     */
-    public registerContent<T extends object>(
-        contentDefinition: ContentDefinition<T>
+    public registerContent(
+        contentDefinition: ContentDefinition<any>
     ): boolean {
         const { type, content } = contentDefinition;
-        const loader = this.loaderRegistry.getLoader(type);
-
+        const loader = this.loaderRegistry.getLoader<any>(type);
         if (!loader) {
             console.warn(`No loader registered for content type '${type}'`);
             return false;
         }
-
-        loader.registerContent(content);
-        return true;
+        try {
+            loader.registerContent(content);
+            return true;
+        } catch (error) {
+            console.error(`Failed to register content for type '${type}':`, error);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to register content for type '${type}'`,
+                error,
+                context: 'registerContent'
+            });
+            return false;
+        }
     }
 
-    /**
-     * Získá loader obsahu podle typu
-     *
-     * @param type Typ obsahu
-     * @returns Loader pro daný typ obsahu nebo undefined
-     */
     public getLoader<T extends object, K extends string = string>(
         type: string
     ): GenericContentLoader<T, K> | undefined {
         return this.loaderRegistry.getLoader<T, K>(type);
     }
 
-    /**
-     * Registruje posluchače události
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která bude volána při události
-     */
+    // Obecné on/off/emit pro flexibilitu
     public on(eventType: GameEventType, listener: EventListener): void {
         this.eventEmitter.on(eventType, listener);
     }
-
-    /**
-     * Odregistruje posluchače události
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která byla zaregistrována
-     */
     public off(eventType: GameEventType, listener: EventListener): void {
         this.eventEmitter.off(eventType, listener);
     }
-
-    /**
-     * Emituje událost
-     *
-     * @param eventType Typ události
-     * @param data Volitelná data události
-     */
     public emit(eventType: GameEventType, data?: any): void {
         this.eventEmitter.emit(eventType, data);
     }
 
-    /**
-     * Vrátí aktuální herní stav
-     *
-     * @returns Aktuální herní stav
-     */
-    public getState(): GameState {
-        return this.stateManager.getState();
-    }
+    // --- Gettery pro managery ---
+    public getState(): GameState { return this.stateManager.getState(); }
+    public getCurrentScene(): Scene | null { return this.sceneManager.getCurrentScene(); }
+    public getCurrentSceneKey(): SceneKey | null { return this.sceneManager.getCurrentSceneKey(); }
+    public getVersion(): string { return this.version; }
+    public isGameRunning(): boolean { return this.isRunning; }
+    public getStateManager(): GameStateManager { return this.stateManager; }
+    public getSceneManager(): SceneManager { return this.sceneManager; }
+    public getEffectManager(): EffectManager { return this.effectManager; }
+    public getPluginManager(): PluginManager { return this.pluginManager; }
+    public getLoaderRegistry(): LoaderRegistry { return this.loaderRegistry; }
+    public getSaveManager(): SaveManager { return this.saveManager; }
 
-    /**
-     * Vrátí aktuální scénu
-     *
-     * @returns Aktuální scéna nebo null
-     */
-    public getCurrentScene(): Scene | null {
-        return this.sceneManager.getCurrentScene();
-    }
-
-    /**
-     * Vrátí klíč aktuální scény
-     *
-     * @returns Klíč aktuální scény nebo null
-     */
-    public getCurrentSceneKey(): SceneKey | null {
-        return this.sceneManager.getCurrentSceneKey();
-    }
-
-    /**
-     * Vrátí verzi enginu
-     *
-     * @returns Verze enginu
-     */
-    public getVersion(): string {
-        return this.version;
-    }
-
-    /**
-     * Kontroluje, zda je hra spuštěna
-     *
-     * @returns True, pokud je hra spuštěna
-     */
-    public isGameRunning(): boolean {
-        return this.isRunning;
-    }
-
-    /**
-     * Vrátí správce stavu
-     *
-     * @returns Správce stavu
-     */
-    public getStateManager(): GameStateManager {
-        return this.stateManager;
-    }
-
-    /**
-     * Vrátí správce scén
-     *
-     * @returns Správce scén
-     */
-    public getSceneManager(): SceneManager {
-        return this.sceneManager;
-    }
-
-    /**
-     * Vrátí správce efektů
-     *
-     * @returns Správce efektů
-     */
-    public getEffectManager(): EffectManager {
-        return this.effectManager;
-    }
-
-    /**
-     * Vrátí správce pluginů
-     *
-     * @returns Správce pluginů
-     */
-    public getPluginManager(): PluginManager {
-        return this.pluginManager;
-    }
-
-    /**
-     * Vrátí registr loaderů obsahu
-     *
-     * @returns Registr loaderů obsahu
-     */
-    public getLoaderRegistry(): LoaderRegistry {
-        return this.loaderRegistry;
-    }
-
-    /**
-     * Vrátí správce ukládání
-     *
-     * @returns Správce ukládání
-     */
-    public getSaveManager(): SaveManager {
-        return this.saveManager;
-    }
-
-
-    /**
-     * Vrátí event emitter
-     *
-     * @returns Event emitter
-     */
-    public getEventEmitter(): EventEmitter {
-        return this.eventEmitter;
-    }
-
-    /**
-     * Registruje plugin
-     *
-     * @param plugin Plugin k registraci
-     * @returns Promise, který se vyřeší na true, pokud byl plugin úspěšně registrován
-     */
+    // --- Metody pro pluginy a ukládání ---
     public async registerPlugin(plugin: Plugin): Promise<boolean> {
         return await this.pluginManager.registerPlugin(plugin);
     }
-
-    /**
-     * Odregistruje plugin
-     *
-     * @param pluginName Název pluginu
-     * @returns Promise, který se vyřeší na true, pokud byl plugin úspěšně odregistrován
-     */
     public async unregisterPlugin(pluginName: string): Promise<boolean> {
         return await this.pluginManager.unregisterPlugin(pluginName);
     }
-
-    /**
-     * Získá plugin podle názvu
-     *
-     * @param pluginName Název pluginu
-     * @returns Plugin nebo undefined
-     */
     public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
         return this.pluginManager.getPlugin<T>(pluginName);
     }
-
-    /**
-     * Uloží aktuální stav hry
-     *
-     * @param saveId ID uložené hry
-     * @param options Volitelné možnosti
-     * @returns Promise, který se vyřeší na true, pokud bylo uložení úspěšné
-     */
     public async saveGame(saveId: string, options = {}): Promise<boolean> {
         return await this.saveManager.save(saveId, options);
     }
-
-    /**
-     * Načte uloženou hru
-     *
-     * @param saveId ID uložené hry
-     * @returns Promise, který se vyřeší na true, pokud bylo načtení úspěšné
-     */
     public async loadGame(saveId: string): Promise<boolean> {
         return await this.saveManager.load(saveId);
     }
-
-    /**
-     * Restartuje engine s novým stavem
-     *
-     * @param options Volitelné možnosti restartu
-     * @returns Promise, který se vyřeší, když je restart dokončen
-     */
     public async restart(options: {
         initialState?: Partial<GameState>;
         initialSceneKey?: SceneKey;
     } = {}): Promise<boolean> {
-        // Ukončíme aktuální hru, pokud běží
         if (this.isRunning) {
             this.end('restart');
         }
-
-        // Resetujeme stav
-        if (options.initialState) {
-            this.stateManager.resetState(options.initialState);
-        } else {
-            this.stateManager.resetState();
-        }
-
-        // Určíme počáteční scénu
-        const initialSceneKey = options.initialSceneKey || this.getCurrentSceneKey() || 'start';
-
-        // Spustíme hru znovu
+        this.stateManager.resetState(options.initialState);
+        const initialSceneKey = options.initialSceneKey || this.sceneManager.getCurrentSceneKey() || 'start';
         return await this.start(initialSceneKey);
     }
 }
@@ -1939,137 +1821,105 @@ export * from './types';
 export { GameEngine } from './GameEngine';
 
 // Export utilit
-export {
-    createGameEngine,
-    createSimpleGameEngine,
-    createDebugGameEngine,
-    preloadAllScenes
-} from './utils';
+export { createGameEngine } from './utils';
 </file>
 
 <file path="src/engine/types.ts">
-import { Scene } from '../scene/types';
-import { GameStateManager } from '../state/GameStateManager';
-import { EffectManager } from '../effect/EffectManager';
-import { PluginManager } from '../plugin/PluginManager';
-import { LoaderRegistry } from '../content/LoaderRegistry';
-import { EventEmitter } from '../event/EventEmitter';
-import { SaveManager } from '../save/SaveManager';
-import { EntityManager } from '../entity/EntityManager';
-import { GameState } from '../state/types';
-import { SaveStorage } from '../save/types';
-import { GenericContentLoader } from '../content/GenericContentLoader';
-import { Plugin } from '../plugin/types';
-import { SceneKey, SceneTransitionOptions } from '../scene/types';
-import { Effect } from '../effect/types';
+import { Scene, SceneKey } from '../scene';
+import { GameState, GameStateManagerEvents, StateManagerPersistenceEvents } from '../state';
+import { Effect } from '../effect';
+import { Plugin, PluginEventMap } from '../plugin';
+import { SaveManager, SaveStorage, SaveEventMap } from '../save';
+import { GenericContentLoader } from '../content';
+import { EventEmitter } from '../event';
 
-/**
- * Možnosti konfigurace herního enginu
- */
+/** Možnosti konfigurace herního enginu */
 export interface GameEngineOptions {
-    /** Loader scén pro načítání herního obsahu */
     sceneLoader: GenericContentLoader<Scene>;
-
-    /** Počáteční stav hry, který bude sloučen s výchozím prázdným stavem */
     initialState?: Partial<GameState>;
-
-    /** Pluginy, které budou registrovány s enginem */
     plugins?: Plugin[];
-
-    /** SaveManager pro ukládání a načítání her (volitelné) */
     saveManager?: SaveManager;
-
-    /** Verze enginu pro ukládání her (volitelné) */
     engineVersion?: string;
-
-    /** Event emitter pro události enginu (volitelné) */
     eventEmitter?: EventEmitter;
-
-    /** Úložiště pro ukládání her (volitelné) */
     saveStorage?: SaveStorage;
-
-    /** Další konfigurační možnosti specifické pro implementaci */
+    allowPluginOverride?: boolean; // Příklad
+    storagePrefix?: string; // Příklad
     [key: string]: any;
 }
 
-/**
- * Události emitované herním enginem
- */
-export enum GameEngineEvents {
-    /** Hra byla zahájena */
-    GAME_STARTED = 'gameStarted',
-
-    /** Hra byla ukončena */
-    GAME_ENDED = 'gameEnded',
-
-    /** Došlo ke změně scény */
-    SCENE_CHANGED = 'sceneChanged',
-
-    /** Došlo ke změně stavu */
-    STATE_CHANGED = 'stateChanged',
-
-    /** Byl aplikován efekt na stav */
-    EFFECT_APPLIED = 'effectApplied',
-
-    /** Došlo k chybě v enginu */
-    ERROR = 'engineError'
+/** Události emitované *přímo* herním enginem (core události) */
+export enum GameEngineCoreEvents { // Přejmenováno pro odlišení
+    GAME_STARTED = 'game:started',
+    GAME_ENDED = 'game:ended',
+    SCENE_CHANGED = 'scene:changed', // Scéna se změnila (z pohledu enginu)
+    EFFECT_APPLIED = 'effect:applied', // Efekt byl aplikován (z pohledu enginu)
+    ERROR = 'engine:error' // Obecná chyba enginu
+    // STATE_CHANGED se nyní emituje z GameStateManageru
 }
 
-/**
- * Data předávaná při události startu hry
- */
+// --- Typy dat pro Core události ---
+
+/** Data předávaná při události startu hry */
 export interface GameStartedEventData {
-    /** Klíč počáteční scény */
     sceneKey: SceneKey;
-
-    /** Volitelná data předaná při startu */
     transitionData?: any;
 }
 
-/**
- * Data předávaná při události konce hry
- */
+/** Data předávaná při události konce hry */
 export interface GameEndedEventData {
-    /** Důvod ukončení hry */
     reason?: string;
-
-    /** Další data o ukončení */
     [key: string]: any;
 }
 
-/**
- * Data předávaná při události změny scény
- */
+/** Data předávaná při události změny scény */
 export interface SceneChangedEventData {
-    /** Nová scéna */
     scene: Scene;
-
-    /** Klíč nové scény */
     sceneKey: SceneKey;
-
-    /** Předchozí scéna */
     previousScene?: Scene;
-
-    /** Klíč předchozí scény */
     previousSceneKey?: SceneKey;
-
-    /** Volitelná data předaná při přechodu */
     transitionData?: any;
 }
 
-/**
- * Data předávaná při události aplikace efektu
- */
+/** Data předávaná při události aplikace efektu */
 export interface EffectAppliedEventData {
-    /** Aplikovaný efekt */
-    effect: Effect;
-
-    /** Stav před aplikací efektu */
+    effect: Effect | { type: 'batch', effects: Effect[] }; // Zahrnuje i batch pro applyEffects
     previousState: GameState;
-
-    /** Stav po aplikaci efektu */
     newState: GameState;
 }
+
+/** Data předávaná při události chyby enginu */
+export interface EngineErrorEventData {
+    message: string;
+    error?: Error | unknown;
+    context?: string; // Kde chyba nastala
+}
+
+// --- Mapa pro Core události ---
+export type EngineCoreEventMap = {
+    [GameEngineCoreEvents.GAME_STARTED]: GameStartedEventData;
+    [GameEngineCoreEvents.GAME_ENDED]: GameEndedEventData;
+    [GameEngineCoreEvents.SCENE_CHANGED]: SceneChangedEventData;
+    [GameEngineCoreEvents.EFFECT_APPLIED]: EffectAppliedEventData;
+    [GameEngineCoreEvents.ERROR]: EngineErrorEventData;
+};
+
+
+/**
+ * Sjednocená mapa VŠECH událostí, které mohou procházet přes engine emitter.
+ * Zahrnuje core události, události pluginů, ukládání a stavu.
+ * Používá se pro typování hlavního `TypedEventEmitter` v GameEngine.
+ * Použití `<any>` pro generické typy stavu je zde kompromis,
+ * pokud nechceme mít GameEngine závislý na konkrétním typu T stavu.
+ */
+export type EngineEventMap = EngineCoreEventMap
+    & PluginEventMap
+    & SaveEventMap
+    & GameStateManagerEvents<any> // Události runtime stavu
+    & StateManagerPersistenceEvents<any>; // Události persistence stavu
+
+
+// Přejmenování enum pro konzistenci (můžeš použít i původní GameEngineEvents, pokud chceš)
+export const GameEngineEvents = GameEngineCoreEvents;
 </file>
 
 <file path="src/engine/utils.ts">
@@ -2376,7 +2226,7 @@ export {
 } from './utils';
 </file>
 
-<file path="src/event/TypedEventEmmitter.ts">
+<file path="src/event/TypedEventEmitter.ts">
 import { EventEmitter } from './EventEmitter';
 
 /**
@@ -2386,74 +2236,38 @@ import { EventEmitter } from './EventEmitter';
 export class TypedEventEmitter<T extends Record<string, any>> {
     private emitter: EventEmitter;
 
-    constructor(emitter?: EventEmitter) {
-        this.emitter = emitter || new EventEmitter();
+    constructor(emitter: EventEmitter) { // Přijímá existující EventEmitter
+        this.emitter = emitter;
     }
 
-    /**
-     * Registruje posluchače pro daný typ události
-     * @param event Typ události
-     * @param listener Funkce volaná při události
-     */
     public on<K extends keyof T>(event: K, listener: (data: T[K]) => void): void {
         this.emitter.on(event as string, listener);
     }
 
-    /**
-     * Registruje jednorázového posluchače pro daný typ události
-     * @param event Typ události
-     * @param listener Funkce volaná při události
-     */
     public once<K extends keyof T>(event: K, listener: (data: T[K]) => void): void {
         this.emitter.once(event as string, listener);
     }
 
-    /**
-     * Odregistruje posluchače pro daný typ události
-     * @param event Typ události
-     * @param listener Funkce volaná při události
-     */
     public off<K extends keyof T>(event: K, listener: (data: T[K]) => void): void {
         this.emitter.off(event as string, listener);
     }
 
-    /**
-     * Emituje událost daného typu
-     * @param event Typ události
-     * @param data Data události
-     */
     public emit<K extends keyof T>(event: K, data: T[K]): void {
         this.emitter.emit(event as string, data);
     }
 
-    /**
-     * Vrátí počet posluchačů pro daný typ události
-     * @param event Typ události
-     */
     public listenerCount<K extends keyof T>(event: K): number {
         return this.emitter.listenerCount(event as string);
     }
 
-    /**
-     * Odstraní všechny posluchače pro daný typ události
-     * @param event Volitelný typ události
-     */
     public removeAllListeners<K extends keyof T>(event?: K): void {
         this.emitter.removeAllListeners(event as string | undefined);
     }
 
-    /**
-     * Nastaví maximální počet posluchačů na jeden typ události
-     * @param n Maximální počet posluchačů
-     */
     public setMaxListeners(n: number): void {
         this.emitter.setMaxListeners(n);
     }
 
-    /**
-     * Získá podkladový EventEmitter
-     * @returns EventEmitter
-     */
     public getUnderlyingEmitter(): EventEmitter {
         return this.emitter;
     }
@@ -2462,96 +2276,16 @@ export class TypedEventEmitter<T extends Record<string, any>> {
 
 <file path="src/event/types.ts">
 /**
- * Typ pro identifikátor události
- * Může být buď z předem definovaných typů, nebo vlastní řetězec
- */
-export type GameEventType =
-    | 'sceneChanged'
-    | 'stateChanged'
-    | 'gameStarted'
-    | 'gameEnded'
-    | 'effectApplied'
-    | string;
-
-/**
  * Typ pro callback funkci posluchače události
+ * Přijímá data události (typ 'any' pro obecný emitter, specifický typ pro TypedEventEmitter)
  */
 export type EventListener = (data: any) => void;
 
 /**
- * Data předávaná při události změny scény
+ * Typ pro identifikátor události
+ * Může být řetězec nebo symbol. Zde používáme string.
  */
-export interface SceneChangedEventData {
-    /**
-     * Nová scéna
-     */
-    scene: any;
-
-    /**
-     * Volitelná data předaná při přechodu
-     */
-    transitionData?: any;
-}
-
-/**
- * Data předávaná při události startu hry
- */
-export interface GameStartedEventData {
-    /**
-     * Klíč počáteční scény
-     */
-    sceneKey: string;
-
-    /**
-     * Volitelná data předaná při startu
-     */
-    transitionData?: any;
-}
-
-/**
- * Data předávaná při události konce hry
- */
-export interface GameEndedEventData {
-    /**
-     * Důvod ukončení hry
-     */
-    reason?: string;
-
-    /**
-     * Konečné skóre nebo jiné metriky
-     */
-    stats?: Record<string, any>;
-}
-
-/**
- * Data předávaná při události aplikace efektu
- */
-export interface EffectAppliedEventData {
-    /**
-     * Aplikovaný efekt
-     */
-    effect: any;
-
-    /**
-     * Stav po aplikaci efektu
-     */
-    state: any;
-}
-
-/**
- * Data předávaná při události změny stavu
- */
-export interface StateChangedEventData {
-    /**
-     * Nový stav
-     */
-    state: any;
-
-    /**
-     * Změny oproti předchozímu stavu
-     */
-    changes?: Record<string, any>;
-}
+export type GameEventType = string;
 
 /**
  * Možnosti pro konfiguraci EventEmitter
@@ -2559,17 +2293,51 @@ export interface StateChangedEventData {
 export interface EventEmitterOptions {
     /**
      * Zachytávat chyby v posluchačích událostí
-     * Pokud true, chyby v posluchačích neukončí zpracování ostatních posluchačů
      * Výchozí: true
      */
     catchErrors?: boolean;
 
     /**
      * Maximální počet posluchačů na jeden typ události
-     * Pokud je překročen, zobrazí se varování (pomáhá odhalit memory leaky)
      * Výchozí: 10
      */
     maxListeners?: number;
+}
+
+/**
+ * Data předávaná při události změny scény (patří spíše do scene/types nebo engine/types)
+ */
+export interface SceneChangedEventData {
+    scene: any; // Mělo by být importováno z scene/types
+    sceneKey: string; // Mělo by být SceneKey z scene/types
+    previousScene?: any;
+    previousSceneKey?: string;
+    transitionData?: any;
+}
+
+/**
+ * Data předávaná při události startu hry (patří spíše do engine/types)
+ */
+export interface GameStartedEventData {
+    sceneKey: string; // Mělo by být SceneKey z scene/types
+    transitionData?: any;
+}
+
+/**
+ * Data předávaná při události konce hry (patří spíše do engine/types)
+ */
+export interface GameEndedEventData {
+    reason?: string;
+    stats?: Record<string, any>; // nebo specifický typ
+}
+
+/**
+ * Data předávaná při události aplikace efektu (patří spíše do engine/types nebo effect/types)
+ */
+export interface EffectAppliedEventData {
+    effect: any; // Mělo by být Effect z effect/types
+    previousState: any; // Mělo by být GameState
+    newState: any; // Mělo by být GameState
 }
 </file>
 
@@ -2706,513 +2474,164 @@ export function createAsyncListener(listener: EventListener): EventListener {
 }
 </file>
 
-<file path="src/loaders/GenericContentLoader.ts">
-import { produce } from '../utils/immer';
-
-/**
- * Interface pro definování content registry s lazy-loading podporou
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
- */
-export interface ContentRegistry<T, K extends string = string> {
-  [key: string]: T | (() => Promise<T | { default: T }>);
-}
-
-/**
- * Konfigurační možnosti pro content loader
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
- */
-export interface ContentLoaderOptions<T extends object, K extends string = string> {
-  /** Počáteční registry obsahu */
-  initialRegistry?: ContentRegistry<T, K>;
-}
-
-/**
- * Generický loader pro herní obsah s podporou lazy-loadingu
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
- */
-export class GenericContentLoader<T extends object, K extends string = string> {
-  /** Cache načteného obsahu */
-  private loadedContent: Map<string, T> = new Map();
-
-  /** Promise pro obsah, který se právě načítá */
-  private loadingPromises: Map<string, Promise<T>> = new Map();
-
-  /** Registry definic obsahu s podporou lazy-loadingu */
-  private registry: ContentRegistry<T, K> = {} as ContentRegistry<T, K>;
-
-  /**
-   * Vytvoří nový content loader
-   * @param options Konfigurační možnosti loaderu
-   */
-  constructor(options: ContentLoaderOptions<T, K> = {}) {
-    const { initialRegistry = {} as ContentRegistry<T, K> } = options;
-    this.registry = { ...initialRegistry };
-  }
-
-  /**
-   * Registruje definice obsahu do loaderu
-   * @param registry Registry s definicemi nebo funkcemi pro lazy-loading
-   */
-  public registerContent(registry: ContentRegistry<T, K>): void {
-    this.registry = produce(this.registry, (draft) => {
-      Object.assign(draft, registry);
-    });
-  }
-
-  /**
-   * Registruje všechen obsah z registry
-   * @param registry Registry s definicemi nebo funkcemi pro lazy-loading
-   */
-  public registerAll(registry: ContentRegistry<T, K>): void {
-    this.registerContent(registry);
-  }
-
-  /**
-   * Načte obsah podle klíče, podporuje jak okamžitý, tak lazy-loaded obsah
-   * @param key Klíč obsahu
-   * @returns Promise, který se vyřeší načteným obsahem
-   * @throws Error pokud obsah s daným klíčem není v registry
-   */
-  public async loadContent(key: string): Promise<T> {
-    // Vrátit z cache, pokud již je načten
-    if (this.loadedContent.has(key)) {
-      return this.loadedContent.get(key)!;
-    }
-
-    // Vrátit existující promise, pokud se již načítá
-    if (this.loadingPromises.has(key)) {
-      return this.loadingPromises.get(key)!;
-    }
-
-    const contentDefOrImport = this.registry[key];
-
-    if (!contentDefOrImport) {
-      throw new Error(`Content with key "${key}" not found in registry`);
-    }
-
-    let loadPromise: Promise<T>;
-
-    if (typeof contentDefOrImport === 'function') {
-      // Zpracování lazy-loaded obsahu
-      const loadFunction = contentDefOrImport as () => Promise<T | { default: T }>;
-      loadPromise = loadFunction().then((module): T => {
-        // Kontrola, zda máme default export (ES module) nebo přímý obsah
-        const content = this.isModuleWithDefault(module) ? module.default : module;
-
-        // Přidáme _key do načteného obsahu
-        const enhancedContent = typeof content === 'object' && content !== null
-            ? { ...content, _key: key }
-            : content;
-
-        this.loadedContent.set(key, enhancedContent);
-        return enhancedContent;
-      });
-    } else {
-      // Zpracování přímého obsahu
-      const content = typeof contentDefOrImport === 'object' && contentDefOrImport !== null
-          ? { ...contentDefOrImport, _key: key }
-          : contentDefOrImport;
-
-      loadPromise = Promise.resolve(content);
-      this.loadedContent.set(key, content);
-    }
-
-    this.loadingPromises.set(key, loadPromise);
-    return loadPromise;
-  }
-
-  /**
-   * Kontroluje, zda obsah s daným klíčem existuje v registry
-   * @param key Klíč obsahu
-   * @returns True pokud obsah existuje, false jinak
-   */
-  public hasContent(key: string): boolean {
-    return key in this.registry;
-  }
-
-  /**
-   * Získá všechny klíče obsahu registrované v loaderu
-   * @returns Pole klíčů obsahu
-   */
-  public getContentKeys(): string[] {
-    return Object.keys(this.registry);
-  }
-
-  /**
-   * Předem načte obsah podle klíčů
-   * @param keys Volitelné pole klíčů obsahu k načtení, načte veškerý obsah pokud není uvedeno
-   * @returns Promise, který se vyřeší, když je veškerý obsah načten
-   */
-  public async preloadContent(keys?: string[]): Promise<void> {
-    const keysToLoad: string[] = keys || this.getContentKeys();
-    await Promise.all(keysToLoad.map(key => this.loadContent(key)));
-  }
-
-  /**
-   * Získá podkladový registry obsahu
-   * @returns Aktuální registry obsahu
-   */
-  public getRegistry(): ContentRegistry<T, K> {
-    return this.registry;
-  }
-
-  /**
-   * Vyčistí cache a načte veškerý obsah znovu při příštím požadavku
-   */
-  public clearCache(): void {
-    this.loadedContent.clear();
-    this.loadingPromises.clear();
-  }
-
-  /**
-   * Type guard pro kontrolu, zda objekt má default export
-   * @param obj Objekt ke kontrole
-   * @returns True pokud objekt má default vlastnost typu T
-   * @private
-   */
-  private isModuleWithDefault(obj: any): obj is { default: T } {
-    return obj && typeof obj === 'object' && 'default' in obj;
-  }
-}
-</file>
-
-<file path="src/loaders/index.ts">
-// Exportujeme třídy
-export { GenericContentLoader } from './GenericContentLoader';
-export { LoaderRegistry } from './LoaderRegistry';
-
-// Exportujeme typy s přejmenováním
-export type {
-    ContentLoaderOptions as GenericContentLoaderOptions
-} from './GenericContentLoader';
-</file>
-
-<file path="src/loaders/LoaderRegistry.ts">
-import { GenericContentLoader } from './GenericContentLoader';
-
-/**
- * Registry for managing multiple content loaders
- * Provides a central point for registering and accessing loaders for different content types
- */
-export class LoaderRegistry {
-    /** Map of loaders organized by type */
-    private loaders: Map<string, GenericContentLoader<any, any>> = new Map();
-
-    /**
-     * Registers a loader for a specific content type
-     * @param type Content type identifier
-     * @param loader Loader instance for the content type
-     * @returns This registry instance for chaining
-     */
-    public registerLoader<T extends object, K extends string = string>(
-        type: string,
-        loader: GenericContentLoader<T, K>
-    ): LoaderRegistry {
-        this.loaders.set(type, loader);
-        return this;
-    }
-
-    /**
-     * Gets a loader for a specific content type
-     * @template T Content type
-     * @template K Content ID type
-     * @param type Content type identifier
-     * @returns Loader instance for the content type or undefined if not found
-     */
-    public getLoader<T extends object, K extends string = string>(
-        type: string
-    ): GenericContentLoader<T, K> | undefined {
-        return this.loaders.get(type) as GenericContentLoader<T, K> | undefined;
-    }
-
-    /**
-     * Checks if a loader for a specific content type exists
-     * @param type Content type identifier
-     * @returns True if loader exists, false otherwise
-     */
-    public hasLoader(type: string): boolean {
-        return this.loaders.has(type);
-    }
-
-    /**
-     * Gets all registered content types
-     * @returns Array of content type identifiers
-     */
-    public getContentTypes(): string[] {
-        return Array.from(this.loaders.keys());
-    }
-
-    /**
-     * Removes a loader for a specific content type
-     * @param type Content type identifier
-     * @returns True if loader was removed, false if it didn't exist
-     */
-    public removeLoader(type: string): boolean {
-        return this.loaders.delete(type);
-    }
-}
-</file>
-
 <file path="src/plugin/AbstractPlugin.ts">
 import { GameEngine } from '../engine/GameEngine';
 import { Plugin, PluginOptions } from './types';
 import { GenericContentLoader } from '../content/GenericContentLoader';
 import { Effect, EffectProcessor } from '../effect/types';
-import { GameState, GameEventType, EventListener } from '../state/types';
-import { SceneKey } from '../scene/types';
+import { GameState } from '../state/types'; // GameState zůstává ze state/types
+import { GameEventType, EventListener } from '../event/types'; // Opravený import
+import { SceneKey, SceneTransitionOptions } from '../scene/types'; // Přidán import SceneTransitionOptions
 
 /**
  * Abstraktní základní třída pro pluginy
- * Poskytuje společnou funkcionalitu a strukturu pro všechny pluginy
  */
 export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptions> implements Plugin {
-    /** Název pluginu */
     public readonly name: string;
-
-    /** Možnosti konfigurace pluginu */
     protected options: Options;
-
-    /** Reference na herní engine */
     protected engine: GameEngine | null = null;
-
-    /** Loadery obsahu používané tímto pluginem */
     protected loaders: Map<string, GenericContentLoader<any>> = new Map();
-
-    /** Registrované efekty s jmenným prostorem tohoto pluginu */
     protected registeredEffects: Set<string> = new Set();
-
-    /** Registrované posluchače událostí pro snadnou odregistraci */
     private eventListeners: Map<GameEventType, Set<EventListener>> = new Map();
 
-    /**
-     * Vytvoří novou instanci pluginu
-     *
-     * @param name Název pluginu
-     * @param options Možnosti konfigurace pluginu
-     */
     constructor(name: string, options: Options) {
         this.name = name;
         this.options = options;
         this.setupLoaders();
     }
 
-    /**
-     * Nastaví loadery obsahu používané tímto pluginem
-     * Přepište tuto metodu pro inicializaci specifických loaderů pluginu
-     */
     protected setupLoaders(): void {
         // Přepište v potomkovi pro registraci specifických loaderů
     }
 
-    /**
-     * Inicializuje plugin s herním enginem
-     * Tato metoda je nyní asynchronní pro podporu asynchronní inicializace
-     *
-     * @param engine Instance herního enginu
-     */
     public async initialize(engine: GameEngine): Promise<void> {
         this.engine = engine;
 
-        // Registrace všech loaderů v enginu
         this.loaders.forEach((loader, type) => {
             engine.getLoaderRegistry().registerLoader(type, loader);
         });
 
-        // Registrace obsahu
         await this.registerContent();
-
-        // Registrace posluchačů událostí
         this.registerEventHandlers();
-
-        // Registrace procesorů efektů
-        this.registerEffectProcessors();
-
-        // Spuštění inicializace specifické pro plugin
+        this.setupEffectProcessors(); // <-- Přejmenovaná metoda
         await this.onInitialize();
     }
 
-    /**
-     * Registruje obsah v enginu
-     * Přepište tuto metodu pro registraci obsahu specifického pro plugin
-     * Nyní asynchronní pro podporu lazy loadingu
-     */
     protected async registerContent(): Promise<void> {
         // Přepište v potomkovi pro registraci specifického obsahu
     }
 
-    /**
-     * Registruje posluchače událostí v enginu
-     * Přepište tuto metodu pro registraci posluchačů specifických pro plugin
-     */
     protected registerEventHandlers(): void {
         // Přepište v potomkovi pro registraci specifických posluchačů událostí
     }
 
     /**
-     * Registruje procesory efektů v enginu
-     * Přepište tuto metodu pro registraci procesorů specifických pro plugin
+     * Nastavuje (setup) procesory efektů specifické pro plugin.
+     * Přepište tuto metodu pro registraci procesorů specifických pro plugin.
+     * Uvnitř této metody můžete volat `this.registerEffectProcessors(...)` s mapou procesorů.
      */
-    protected registerEffectProcessors(): void {
+    protected setupEffectProcessors(): void { // <-- PŘEJMENOVANÁ HOOK METODA
         // Přepište v potomkovi pro registraci specifických procesorů efektů
+        // Příklad v potomkovi:
+        // const myProcessors = { 'myEffect': (effect, state) => { ... } };
+        // this.registerEffectProcessors(myProcessors);
     }
 
-    /**
-     * Volá se během inicializace pluginu
-     * Přepište tuto metodu pro logiku inicializace specifické pro plugin
-     * Nyní asynchronní pro podporu asynchronní inicializace
-     */
+
     protected async onInitialize(): Promise<void> {
         // Přepište v potomkovi pro logiku specifickou pro plugin
     }
 
-    /**
-     * Vyčistí zdroje pluginu
-     * Volá se při odregistraci pluginu
-     */
     public async destroy(): Promise<void> {
-        // Odregistrace všech posluchačů událostí
         if (this.engine) {
             this.unregisterEventHandlers();
             this.unregisterEffectProcessors();
-
-            // Spuštění čištění specifického pro plugin
             await this.onDestroy();
 
-            // Odregistrace loaderů registrovaných tímto pluginem
             this.loaders.forEach((_, type) => {
                 this.engine?.getLoaderRegistry().removeLoader(type);
             });
-
             this.engine = null;
         }
     }
 
-    /**
-     * Odregistruje posluchače událostí z enginu
-     */
     protected unregisterEventHandlers(): void {
         if (this.engine) {
-            // Odregistrace všech sledovaných posluchačů událostí
             this.eventListeners.forEach((listeners, eventType) => {
                 listeners.forEach(listener => {
-                    this.engine?.getEventEmitter().off(eventType, listener);
+                    // Použijeme obecný emitter pro odregistraci
+                    this.engine?.getGenericEventEmitter().off(eventType, listener);
                 });
             });
             this.eventListeners.clear();
         }
     }
 
-    /**
-     * Odregistruje procesory efektů
-     */
     protected unregisterEffectProcessors(): void {
         if (this.engine) {
-            // Odregistrace všech efektů pomocí jmenného prostoru
             this.engine.getEffectManager().unregisterNamespace(this.name);
             this.registeredEffects.clear();
         }
     }
 
-    /**
-     * Volá se během čištění pluginu
-     * Přepište tuto metodu pro logiku čištění specifickou pro plugin
-     * Nyní asynchronní pro podporu asynchronního čištění
-     */
     protected async onDestroy(): Promise<void> {
         // Přepište v potomkovi pro logiku čištění specifickou pro plugin
     }
 
-    /**
-     * Získá aktuální herní stav
-     *
-     * @returns Aktuální herní stav nebo undefined pokud plugin není inicializován
-     */
     protected getState(): GameState | undefined {
         return this.engine?.getState();
     }
 
-    /**
-     * Získá loader obsahu podle typu
-     *
-     * @param type Typ obsahu
-     * @returns Loader obsahu nebo undefined pokud nenalezen
-     */
     protected getLoader<T extends object, K extends string = string>(type: string): GenericContentLoader<T, K> | undefined {
         return this.engine?.getLoaderRegistry().getLoader<T, K>(type);
     }
 
-    /**
-     * Přidá namespace prefix k typu efektu, pokud je potřeba
-     *
-     * @param effectType Typ efektu k prefixování
-     * @returns Prefixovaný typ efektu
-     */
     private namespaceEffectType(effectType: string): string {
+        // Jednoduchý check, zda už namespace obsahuje - pro případ volání s již namespacovaným typem
         return effectType.includes(':') ? effectType : `${this.name}:${effectType}`;
     }
 
-    /**
-     * Registruje procesor efektu s automatickým prefixem namespace
-     *
-     * @param effectType Typ efektu
-     * @param processor Funkce pro zpracování efektu
-     */
     protected registerEffectProcessor(effectType: string, processor: EffectProcessor): void {
         if (this.engine) {
             const namespacedType = this.namespaceEffectType(effectType);
+            // Registrace přes EffectManager s namespacovaným typem
             this.engine.getEffectManager().registerEffectProcessor(namespacedType, processor);
-            this.registeredEffects.add(namespacedType);
+            this.registeredEffects.add(namespacedType); // Sledujeme namespacovaný typ
         }
     }
 
     /**
-     * Registruje více procesorů efektů najednou
+     * Registruje více procesorů efektů najednou s automatickým namespacingem.
+     * Tuto metodu volejte z `setupEffectProcessors` nebo `onInitialize`.
      *
      * @param processors Objekt mapující typy efektů na procesory
      */
-    protected registerEffectProcessors(processors: Record<string, EffectProcessor>): void {
+    protected registerEffectProcessors(processors: Record<string, EffectProcessor>): void { // <-- HELPER METODA ZŮSTÁVÁ
         if (!this.engine) return;
 
-        // Přidání namespace ke všem typům efektů
         const namespacedProcessors: Record<string, EffectProcessor> = {};
-
         for (const [type, processor] of Object.entries(processors)) {
             const namespacedType = this.namespaceEffectType(type);
             namespacedProcessors[namespacedType] = processor;
             this.registeredEffects.add(namespacedType);
         }
-
+        // Registrace přes EffectManager
         this.engine.getEffectManager().registerEffectProcessors(namespacedProcessors);
     }
 
-    /**
-     * Emituje událost s prefixem namespace
-     *
-     * @param eventType Typ události
-     * @param data Volitelná data události
-     */
+
     protected emitNamespacedEvent(eventType: string, data?: any): void {
         if (this.engine) {
             const namespacedType = eventType.includes(':') ? eventType : `${this.name}:${eventType}`;
-            this.engine.getEventEmitter().emit(namespacedType, data);
+            // Použijeme obecný emit enginu
+            this.engine.emit(namespacedType, data);
         }
     }
 
-    /**
-     * Registruje posluchače události a sleduje ho pro automatickou odregistraci
-     *
-     * @param eventType Typ události
-     * @param listener Funkce volaná při události
-     */
     protected registerEventListener(eventType: GameEventType, listener: EventListener): void {
         if (this.engine) {
-            // Registrace v enginu
-            this.engine.getEventEmitter().on(eventType, listener);
-
-            // Sledování pro pozdější odregistraci
+            // Registrace přes obecný emitter enginu
+            this.engine.getGenericEventEmitter().on(eventType, listener);
             if (!this.eventListeners.has(eventType)) {
                 this.eventListeners.set(eventType, new Set());
             }
@@ -3220,18 +2639,10 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
         }
     }
 
-    /**
-     * Odregistruje posluchače události
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která byla registrována
-     */
     protected unregisterEventListener(eventType: GameEventType, listener: EventListener): void {
         if (this.engine) {
-            // Odregistrace z enginu
-            this.engine.getEventEmitter().off(eventType, listener);
-
-            // Odstranění ze sledování
+            // Odregistrace přes obecný emitter enginu
+            this.engine.getGenericEventEmitter().off(eventType, listener);
             const listeners = this.eventListeners.get(eventType);
             if (listeners) {
                 listeners.delete(listener);
@@ -3242,42 +2653,19 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
         }
     }
 
-    /**
-     * Přesune hru do zadané scény pomocí enginu
-     * Pohodlná metoda pro použití v pluginech
-     *
-     * @param sceneKey Klíč cílové scény
-     * @param options Volitelné možnosti přechodu
-     * @returns Promise který se vyřeší na true, pokud byl přechod úspěšný
-     */
     protected async transitionToScene(
         sceneKey: SceneKey,
-        options?: {
-            effects?: Effect[],
-            data?: any
-        }
+        options?: SceneTransitionOptions // Použij importovaný typ
     ): Promise<boolean> {
         if (!this.engine) return false;
         return await this.engine.transitionToScene(sceneKey, options);
     }
 
-    /**
-     * Aplikuje efekt na herní stav pomocí enginu
-     * Pohodlná metoda pro použití v pluginech
-     *
-     * @param effect Efekt k aplikaci
-     */
     protected applyEffect(effect: Effect): void {
         if (!this.engine) return;
         this.engine.applyEffect(effect);
     }
 
-    /**
-     * Aplikuje více efektů na herní stav pomocí enginu
-     * Pohodlná metoda pro použití v pluginech
-     *
-     * @param effects Efekty k aplikaci
-     */
     protected applyEffects(effects: Effect[]): void {
         if (!this.engine) return;
         this.engine.applyEffects(effects);
@@ -3702,143 +3090,64 @@ export class PluginManager {
 <file path="src/plugin/types.ts">
 import { GameEngine } from '../engine/GameEngine';
 
-/**
- * Základní rozhraní pro plugin
- */
+/** Základní rozhraní pro plugin */
 export interface Plugin {
-  /**
-   * Jedinečný název pluginu
-   */
   name: string;
-
-  /**
-   * Inicializuje plugin a připojí jej k enginu
-   * @param engine Instance herního enginu
-   */
   initialize: (engine: GameEngine) => Promise<void> | void;
-
-  /**
-   * Volitelná metoda pro čištění zdrojů při odstranění pluginu
-   */
   destroy?: () => Promise<void> | void;
 }
 
-/**
- * Možnosti konfigurace pluginu
- */
+/** Možnosti konfigurace pluginu */
 export interface PluginOptions {
-  /**
-   * Indexová signatura pro libovolné konfigurační parametry
-   */
   [key: string]: any;
 }
 
-/**
- * Možnosti pro registry pluginů
- */
+/** Možnosti pro registry pluginů */
 export interface PluginRegistryOptions {
-  /**
-   * Automaticky aktivovat pluginy při registraci
-   * Výchozí: true
-   */
   autoActivate?: boolean;
-
-  /**
-   * Zda povolit přepsání již registrovaného pluginu
-   * Výchozí: false
-   */
   allowOverride?: boolean;
 }
 
-/**
- * Události emitované systémem pluginů
- */
+/** Události emitované systémem pluginů */
 export enum PluginEvents {
-  /**
-   * Plugin byl registrován
-   */
   REGISTERED = 'plugin:registered',
-
-  /**
-   * Plugin byl odregistrován
-   */
   UNREGISTERED = 'plugin:unregistered',
-
-  /**
-   * Plugin byl inicializován
-   */
   INITIALIZED = 'plugin:initialized',
-
-  /**
-   * Došlo k chybě při inicializaci pluginu
-   */
   ERROR = 'plugin:error'
 }
 
-/**
- * Data předávaná při události registrace pluginu
- */
+/** Data předávaná při události registrace pluginu */
 export interface PluginRegisteredEventData {
-  /**
-   * Název registrovaného pluginu
-   */
   name: string;
-
-  /**
-   * Instance pluginu
-   */
   plugin: Plugin;
 }
 
-/**
- * Data předávaná při události odregistrace pluginu
- */
+/** Data předávaná při události odregistrace pluginu */
 export interface PluginUnregisteredEventData {
-  /**
-   * Název odregistrovaného pluginu
-   */
   name: string;
 }
 
-/**
- * Data předávaná při události inicializace pluginu
- */
+/** Data předávaná při události inicializace pluginu */
 export interface PluginInitializedEventData {
-  /**
-   * Název inicializovaného pluginu
-   */
   name: string;
-
-  /**
-   * Instance pluginu
-   */
   plugin: Plugin;
 }
 
-/**
- * Data předávaná při události chyby pluginu
- */
+/** Data předávaná při události chyby pluginu */
 export interface PluginErrorEventData {
-  /**
-   * Název pluginu, který způsobil chybu
-   */
   name: string;
-
-  /**
-   * Instance pluginu
-   */
   plugin: Plugin;
-
-  /**
-   * Objekt chyby
-   */
-  error: Error;
-
-  /**
-   * Fáze, ve které nastala chyba (např. "initialize", "destroy")
-   */
-  phase: string;
+  error: Error | unknown; // Použij 'unknown' pro lepší typování chyb
+  phase: 'initialize' | 'destroy' | string; // Fáze může být i jiná
 }
+
+/** Mapa událostí pro systém pluginů */
+export type PluginEventMap = {
+  [PluginEvents.REGISTERED]: PluginRegisteredEventData;
+  [PluginEvents.UNREGISTERED]: PluginUnregisteredEventData;
+  [PluginEvents.INITIALIZED]: PluginInitializedEventData;
+  [PluginEvents.ERROR]: PluginErrorEventData;
+};
 </file>
 
 <file path="src/plugin/utils.ts">
@@ -4216,113 +3525,51 @@ import {
     SaveOptions,
     SaveStorage,
     AutoSaveOptions,
-    SaveEvents
-} from './types'; // Import SaveManager types
-import { GameEngine } from '../engine/GameEngine'; // Import GameEngine
-import { EventEmitter } from '../event/EventEmitter'; // Import EventEmitter
-import { SceneKey } from '../scene/types'; // Import SceneKey
-import { GameStateManager } from '../state/GameStateManager'; // Import GameStateManager
-import { StateConverter } from '../state/persistence/StateConverter'; // Import StateConverter
-import { StateMigrationService } from '../state/persistence/StateMigrationService'; // Import StateMigrationService
-import { PersistedState, StateManagerPersistenceEvents } from '../state/persistence/types'; // Import Persistence types
+    SaveEvents,
+    SaveEventMap, // Import mapy událostí
+    GameSavedEventData,
+    GameLoadedEventData,
+    GameDeletedEventData,
+    AllSavesClearedEventData,
+    StorageChangedEventData,
+    AutoSaveEnabledEventData,
+    AutoSaveDisabledEventData
+} from './types';
+import { GameEngine } from '../engine/GameEngine';
+// EventEmitter a TypedEventEmitter už by neměly být potřeba přímo zde
+// import { EventEmitter } from '../event/EventEmitter';
+// import { TypedEventEmitter } from '../event/TypedEventEmmitter';
+import { SceneKey } from '../scene/types';
+import { GameStateManager } from '../state/GameStateManager';
+import { StateConverter } from '../state/persistence/StateConverter';
+import { StateMigrationService } from '../state/persistence/StateMigrationService';
+import { PersistedState, StateManagerPersistenceEvents } from '../state/persistence/types';
 
-// Aktuální verze formátu dat uložení.
-// Tato verze se týká *struktury souboru uložení* (metadata + serializovaný stav string),
-// NE formátu samotného stavu obsaženého uvnitř (ten má svou vlastní verzi v metadatech stavu).
-// Změňte toto číslo, pokud změníte strukturu SaveData nebo SaveMetadata.
 const CURRENT_SAVE_DATA_FORMAT_VERSION = 1;
 
 /**
  * Správce ukládání a načítání her
- *
- * Koordinuje proces ukládání a načítání her, včetně správy metadat uložení,
- * verzování dat uložení a automatického ukládání.
- * Využívá GameStateManager a persistence služby pro práci s herním stavem.
- * @template T Typ proměnných ve stavu hry spravovaném tímto SaveManagerem.
+ * @template T Typ proměnných ve stavu hry
  */
 export class SaveManager<T extends Record<string, unknown> = Record<string, unknown>> {
-    /**
-     * Event emitter pro události SaveManageru.
-     */
-    private eventEmitter: EventEmitter; // GameEngine's event emitter
-
-    /**
-     * Reference na herní engine.
-     * Používá se pro získání GameStateManageru, SceneManageru atd.
-     */
     private engine: GameEngine;
-
-    /**
-     * Úložiště pro uložené hry (plugovatelný interface).
-     * Zodpovídá za fyzické čtení a zápis dat (JSON stringů) do nějakého média.
-     */
     private storage: SaveStorage;
-
-    /**
-     * Verze formátu dat uložení spravovaná tímto SaveManagerem.
-     * Ukládá se do metadat uložení.
-     */
     private readonly saveDataFormatVersion: number;
-
-    /**
-     * Aktuální verze enginu.
-     * Ukládá se do metadat uložení pro referenci.
-     */
     private readonly engineVersion: string;
-
-    /**
-     * Časovač pro automatické ukládání.
-     */
-    private autoSaveTimer: number | null = null; // number v prohlížeči, NodeJS.Timeout v Node
-
-    /**
-     * Nastavení pro automatické ukládání.
-     */
+    private autoSaveTimer: ReturnType<typeof setInterval> | null = null; // Použij správný typ
     private autoSaveOptions: AutoSaveOptions | null = null;
-
-    /**
-     * Počítadlo automatických uložení (pro rotující sloty).
-     */
     private autoSaveCounter: number = 0;
-
-    /**
-     * Čas, kdy hra naposledy začala počítat čas hraní (při startu/načtení).
-     * Používá se pro výpočet aktuálního času hraní.
-     */
     private gameStartTime: number;
-
-    /**
-     * Celkový čas hraní v milisekundách zaznamenaný do posledního uložení/načtení.
-     */
     private totalPlayTime: number = 0;
-
-    /**
-     * ID rychlého uložení.
-     */
     private readonly quickSaveId: string = 'quicksave';
+    private stateConverter: typeof StateConverter; // Statické reference
+    private stateMigrationService: typeof StateMigrationService; // Statické reference
 
-    /**
-     * Reference na statickou službu pro konverzi runtime stavu na persistovaný a zpět.
-     */
-    private stateConverter: typeof StateConverter;
-
-    /**
-     * Reference na statickou službu pro migraci persistovaného stavu.
-     */
-    private stateMigrationService: typeof StateMigrationService;
-
-    /**
-     * Vytvoří novou instanci SaveManager.
-     *
-     * @param engine Reference na herní engine.
-     * @param options Možnosti konfigurace SaveManageru.
-     */
     constructor(engine: GameEngine, options: {
         storage: SaveStorage;
         engineVersion?: string;
-        saveDataFormatVersion?: number; // Volitelná verze formátu dat uložení
-        eventEmitter?: EventEmitter;
-        // Reference na persistence služby, volitelné, pokud jsou globálně dostupné nebo v enginu
+        saveDataFormatVersion?: number;
+        // eventEmitter?: EventEmitter; // Už není potřeba předávat emitter
         stateConverter?: typeof StateConverter;
         stateMigrationService?: typeof StateMigrationService;
     }) {
@@ -4330,431 +3577,266 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
         this.storage = options.storage;
         this.engineVersion = options.engineVersion || (typeof engine.getVersion === 'function' ? engine.getVersion() : '0.1.0');
         this.saveDataFormatVersion = options.saveDataFormatVersion || CURRENT_SAVE_DATA_FORMAT_VERSION;
-        this.eventEmitter = options.eventEmitter || engine.getEventEmitter();
-        this.gameStartTime = Date.now(); // Inicializace času při vytvoření SaveManageru
-
-        // Získání nebo převzetí závislostí na persistence službách.
-        // Prozatím předpokládáme, že je buď dostaneme v options, nebo použijeme přímo importované statické třídy.
+        this.gameStartTime = Date.now();
         this.stateConverter = options.stateConverter || StateConverter;
         this.stateMigrationService = options.stateMigrationService || StateMigrationService;
-
-
-        // Sledování událostí enginu pro reset času hraní při startu/načtení hry
         this.setupEventListeners();
     }
 
-    /**
-     * Nastaví event listenery pro sledování herních událostí, které ovlivňují SaveManager.
-     * @private
-     */
     private setupEventListeners(): void {
-        // Sledování začátku hry z GameEngine pro reset času hraní
-        this.engine.getEventEmitter().on('gameStarted', () => {
+        // Naslouchání na core události z enginu
+        this.engine.getCoreEventEmitter().on('gameStarted', () => {
             console.log("SaveManager: Game started event received. Resetting play time.");
-            this.gameStartTime = Date.now(); // Začínáme počítat čas pro novou hru
-            this.totalPlayTime = 0; // Celkový čas začíná od nuly
+            this.gameStartTime = Date.now();
+            this.totalPlayTime = 0;
         });
 
-        // Sledování načtení hry pro obnovu času hraní a reset gameStartTime
-        // Posloucháme na událost SaveEvents.GAME_LOADED, kterou SaveManager sám emituje po úspěšném načtení
-        this.eventEmitter.on(SaveEvents.GAME_LOADED, (data) => {
+        // Naslouchání na save události (emitované SaveManagerem samotným přes engine)
+        this.engine.getSaveEventEmitter().on(SaveEvents.GAME_LOADED, (data) => { // Typ dat je z SaveEventMap
             if (data.success) {
                 console.log("SaveManager: Game loaded event received. Setting play time from metadata and resetting start time.");
-                // totalPlayTime je již nastaveno v load() metodě z metadat načtení
-                this.gameStartTime = Date.now(); // Resetujeme startovací čas, aby se čas začal počítat od tohoto momentu
+                this.gameStartTime = Date.now();
             }
         });
-
-        // Zde mohou být další listenery, např. pro automatické ukládání při změně scény, pokud je to potřeba
-        // this.engine.getEventEmitter().on('sceneChanged', () => { ... trigger auto-save ... });
     }
 
-    /**
-     * Uloží aktuální stav hry.
-     *
-     * @param saveId Identifikátor uložené hry (slot).
-     * @param options Další možnosti pro uložení (např. název, thumbnail).
-     * @returns Promise rozhodnutý na true, pokud bylo uložení úspěšné.
-     */
     public async save(saveId: string, options: SaveOptions = {}): Promise<boolean> {
-        if (!saveId || typeof saveId !== 'string') {
-            console.error("SaveManager: Invalid save ID provided.", saveId);
-            this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, success: false, error: 'invalid id' });
+        // Odstraněna kontrola `typeof saveId !== 'string'`
+        if (!saveId) {
+            console.error("SaveManager: Invalid save ID provided (empty string).", saveId);
+            const errorData: GameSavedEventData = { saveId, success: false, error: 'invalid id' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_SAVED, errorData);
             return false;
         }
 
-        // Aktualizace času hraní PŘED vytvořením metadat
         this.updatePlayTime();
-
-        // Získání aktuálního runtime stavu a konfigurace perzistentních klíčů z GameStateManageru
-        // Očekáváme, že GameEngine má metodu getStateManager, která vrací instanci GameStateManager<T>.
         const gameStateManager = this.engine.getStateManager<T>();
         const currentState = gameStateManager.getState();
         const persistentKeys = gameStateManager.getPersistentKeys();
 
-        // Vytvoření metadat pro samotné uložení (data o uloženém souboru/slotu)
-        // Tato metadata se liší od _metadata uvnitř stavu.
         const metadata: SaveMetadata = {
-            id: saveId,
+            id: saveId, // ID by mělo být nastaveno zde, ne přepsáno z options níže
             name: options.name || this.generateDefaultSaveName(),
-            createdAt: Date.now(), // Čas vytvoření tohoto uloženého slotu
-            updatedAt: Date.now(), // Čas poslední aktualizace
-            playTime: this.totalPlayTime, // Celkový čas hraní k tomuto bodu
-            engineVersion: this.engineVersion, // Verze enginu
-            saveDataFormatVersion: this.saveDataFormatVersion, // Verze formátu SaveData
-            stateFormatVersion: this.stateMigrationService.getCurrentStateFormatVersion(), // Verze formátu stavu uvnitř
-            currentSceneKey: this.engine.getCurrentSceneKey(), // Klíč scény
-            // Zkopírujeme případné další volitelné vlastnosti z options do metadat
-            ...options
-            // Z options ale nechceme přepsat systémové vlastnosti (id, createdAt atd.)
-            // Vylepšili bychom to filtrováním options.
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            playTime: this.totalPlayTime,
+            engineVersion: this.engineVersion,
+            // Opravené názvy verzí podle SaveMetadata
+            saveDataFormatVersion: this.saveDataFormatVersion,
+            stateFormatVersion: this.stateMigrationService.getCurrentStateFormatVersion(),
+            currentSceneKey: this.engine.getCurrentSceneKey(),
+            // Zkopírujeme POUZE bezpečné vlastnosti z options
+            thumbnail: options.thumbnail,
+            // Můžete přidat další povolené klíče z options
+            ...(options.customData && { customData: options.customData }) // Příklad pro vlastní data
         };
 
-        // Odstraníme z metadat vlastnosti, které by tam neměly být, pokud přišly z options
-        delete (metadata as any).id;
-        delete (metadata as any).createdAt;
-        // updateAt může být přepsán? currentSceneKey? playTime? Rozhodněte se, co lze přepsat z options.
-        // Prozatím necháme takto s vědomím, že options může přepsat některé systémové klíče.
-        // Lepší přístup je: const metadata: SaveMetadata = { default_system_values, ...filtered_options };
-
-
-        // Použití StateConverteru k serializaci runtime stavu do JSON stringu.
-        // StateConverter potřebuje runtime stav, seznam klíčů a serializační options.
-        // Také mu předáme callback a emitter, aby mohl emitovat události persistence.
         let serializedState: string;
         try {
+            // Získání typovaného emitteru pro persistenci z enginu
+            const persistenceEmitter = this.engine.getPersistenceEventEmitter<T>();
             serializedState = this.stateConverter.serialize(
                 currentState,
                 persistentKeys,
-                { includeMetadata: true, replacer: options.replacer }, // Pro předání custom replaceru z SaveOptions
-                gameStateManager.getOnBeforeSerializeCallback(), // Callback z GameStateManageru
-                this.eventEmitter as TypedEventEmitter<StateManagerPersistenceEvents<T>> // Emitter pro persistence události
+                { includeMetadata: true, replacer: options.replacer },
+                gameStateManager.getOnBeforeSerializeCallback(),
+                persistenceEmitter // <-- Předání bez přetypování
             );
         } catch (error) {
             console.error(`SaveManager: Failed to serialize game state for save id '${saveId}':`, error);
-            this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, metadata, success: false, error });
+            const errorData: GameSavedEventData = { saveId, metadata, success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_SAVED, errorData);
             return false;
         }
 
+        const saveData: SaveData = { metadata, state: serializedState };
 
-        // Vytvoření dat uložené hry (kontejner pro metadata a serializovaný stav string)
-        const saveData: SaveData = {
-            metadata,
-            state: serializedState // Serializovaný JSON string
-            // Zde by se mohly přidat další data do SaveData, která nesouvisí se stavem, např. screenshot blob
-            // screenshot: options.screenshot,
-        };
-
-        // Uložení dat do úložiště (např. LocalStorage, IndexDB, server)
         try {
             const success = await this.storage.save(saveId, saveData);
-
-            if (success) {
-                console.log(`SaveManager: Game saved successfully with id '${saveId}'.`);
-                this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, metadata, success: true });
-            } else {
-                console.warn(`SaveManager: Storage reported failure to save game with id '${saveId}'.`);
-                this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, metadata, success: false, error: 'storage failed' });
-            }
-
+            const eventData: GameSavedEventData = { saveId, metadata, success, error: success ? undefined : 'storage failed' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_SAVED, eventData);
             return success;
-
         } catch (error) {
             console.error(`SaveManager: Failed to save game to storage for id '${saveId}':`, error);
-            this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, metadata, success: false, error });
+            const errorData: GameSavedEventData = { saveId, metadata, success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_SAVED, errorData);
             return false;
         }
     }
 
-    /**
-     * Načte uloženou hru podle identifikátoru.
-     * Získá data z úložiště, deserializuje je, provede migraci a aplikuje stav na GameStateManager.
-     * @param saveId Identifikátor uložené hry.
-     * @returns Promise rozhodnutý na true, pokud bylo načtení úspěšné.
-     */
     public async load(saveId: string): Promise<boolean> {
-        if (!saveId || typeof saveId !== 'string') {
+        if (!saveId) { // Pouze kontrola na prázdný řetězec
             console.error("SaveManager: Invalid save ID provided for loading.", saveId);
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error: 'invalid id' });
+            const errorData: GameLoadedEventData = { saveId, success: false, error: 'invalid id' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, errorData);
             return false;
         }
 
-        // Načtení dat z úložiště
         let saveData: SaveData | null;
         try {
             saveData = await this.storage.load(saveId);
         } catch (error) {
             console.error(`SaveManager: Failed to load data from storage for id '${saveId}':`, error);
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error }); // Emit failure event
+            const errorData: GameLoadedEventData = { saveId, success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, errorData);
             return false;
         }
 
         if (!saveData) {
             console.error(`SaveManager: Save with id '${saveId}' not found in storage.`);
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error: 'not found' }); // Emit failure event
+            const errorData: GameLoadedEventData = { saveId, success: false, error: 'not found' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, errorData);
             return false;
         }
 
-        // Volitelná Validace základního formátu uložených dat (metadata a string stavu)
-        // Tato validace kontroluje pouze strukturu kontejneru SaveData, ne samotný stav string.
-        // Logika validace by měla být v save/utils.ts.
-        /*
-        if (!validateSaveData(saveData)) { // Předpokládá se existence validateSaveData v save/utils
-             console.error(`SaveManager: Loaded data for id '${saveId}' has invalid SaveData format.`);
-             this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error: 'invalid SaveData format' });
-             return false;
-        }
-        */
-
-        // Migrace formátu SaveData, pokud je potřeba.
-        // Toto se týká struktury metadata nebo dalších polí SaveData, nikoli serializovaného stavu.
-        // Pokud nemáte migrace formátu SaveData, tuto část lze smazat nebo zjednodušit.
+        // Validace a migrace SaveData formátu
         let migratedSaveData = this.migrateSaveDataFormatIfNeeded(saveData);
-        if (!migratedSaveData) { // migrateSaveDataFormatIfNeeded může vrátit null/false při selhání
+        if (!migratedSaveData) {
             console.error(`SaveManager: Failed to migrate SaveData format for id '${saveId}'.`);
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error: 'SaveData format migration failed' });
+            const errorData: GameLoadedEventData = { saveId, success: false, error: 'SaveData format migration failed' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, errorData);
             return false;
         }
-        saveData = migratedSaveData; // Použijeme migrovaná SaveData
-
+        saveData = migratedSaveData;
 
         try {
-            // Získání GameStateManageru
-            // Očekáváme, že GameEngine má metodu getStateManager, která vrací instanci GameStateManager<T>.
             const gameStateManager = this.engine.getStateManager<T>();
+            // Získání typovaného emitteru pro persistenci z enginu
+            const persistenceEmitter = this.engine.getPersistenceEventEmitter<T>();
 
-            // Použití StateConverteru k deserializaci JSON stringu a následné migraci na PersistedState.
-            // StateConverter interně volá StateMigrationService.
             const migratedPersistedState = this.stateConverter.deserialize<T>(
-                saveData.state, // JSON string stavu z načtených dat uložení
-                {}, // Serializační/deserializační options (pokud jsou potřeba)
-                undefined, // onAfterDeserialize callback je zde problematický, předá se GameStateManageru
-                this.eventEmitter as TypedEventEmitter<StateManagerPersistenceEvents<T>> // Emitter pro persistence události
+                saveData.state,
+                {},
+                undefined, // Callback se volá v GameStateManageru
+                persistenceEmitter // <-- Předání bez přetypování
             );
 
-            // Aplikace migrovaného PersistedState na GameStateManager.
-            // Tato metoda GameStateManageru zajistí konverzi Array -> Set a nastavení runtime stavu.
+            // GameStateManager.applyPersistentState nyní volá onAfterDeserialize callback
             gameStateManager.applyPersistentState(migratedPersistedState, 'loadGame');
 
-            // Po úspěšné aplikaci stavu, zavoláme onAfterDeserialize callback GameStateManageru
-            const onAfterDeserializeCallback = gameStateManager.getOnAfterDeserializeCallback();
-            if (onAfterDeserializeCallback) {
-                onAfterDeserializeCallback(gameStateManager.getState()); // Voláme s novým GameState
-            }
-
-
-            // Nastavení času hraní z metadat uložení.
-            // Toto je čas zaznamenaný v době uložení. GameStartTime se resetuje v event listeneru po emitování GAME_LOADED.
             this.totalPlayTime = saveData.metadata.playTime || 0;
-            // this.gameStartTime = Date.now(); // Tuto logiku děláme v event listeneru 'gameLoaded'
+            // this.gameStartTime = Date.now(); // Toto se děje v listeneru
 
-
-            // Přechod na uloženou scénu.
-            // Získáme klíč scény z metadat uložení.
             const currentSceneKey = saveData.metadata.currentSceneKey;
             if (currentSceneKey) {
-                // Můžete předat i transitionData, pokud jsou v metadatech uložení
-                // saveData.metadata by mohla obsahovat i data pro scénu po načtení (např. pozice postavy)
+                // Použijeme engine pro přechod, ne voláme metodu SceneManageru přímo
                 await this.engine.transitionToScene(currentSceneKey as SceneKey, {
-                    // data: saveData.metadata.transitionData // Příklad předání dat
+                    // data: saveData.metadata.customData // Příklad předání custom dat
                 });
             } else {
-                // Pokud není uložena scéna (např. starý formát uložení), můžete přejít na výchozí scénu nebo zůstat
-                console.warn(`SaveManager: Save data for id '${saveId}' does not contain current scene key. Staying on current scene.`);
-                // Nebo: await this.engine.transitionToScene('default_start_scene_key');
+                console.warn(`SaveManager: Save data for id '${saveId}' does not contain current scene key.`);
             }
 
-
-            // Emitování události úspěšného načtení hry.
-            // Posluchači (včetně interního SaveManager listeneru pro čas) mohou reagovat.
             console.log(`SaveManager: Game loaded successfully with id '${saveId}'.`);
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, metadata: saveData.metadata, success: true });
+            const eventData: GameLoadedEventData = { saveId, metadata: saveData.metadata, success: true };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, eventData);
             return true;
 
         } catch (error) {
             console.error(`SaveManager: Failed to process and apply loaded state for id '${saveId}':`, error);
-            // Emitování události selhání načtení
-            this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId, success: false, error });
+            const errorData: GameLoadedEventData = { saveId, success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_LOADED, errorData);
             return false;
         }
     }
 
-    /**
-     * Vrátí seznam metadat všech uložených her z úložiště.
-     *
-     * @returns Promise rozhodnutý na objekt mapující ID na SaveMetadata.
-     */
     public async getSaves(): Promise<Record<string, SaveMetadata>> {
         try {
-            // Úložiště vrátí mapu ID na SaveMetadata
             return await this.storage.list();
         } catch (error) {
             console.error("SaveManager: Failed to list saves from storage:", error);
-            return {}; // V případě chyby vrátí prázdný objekt
+            return {};
         }
     }
 
-    /**
-     * Smaže uloženou hru z úložiště podle identifikátoru.
-     *
-     * @param saveId Identifikátor uložené hry k smazání.
-     * @returns Promise rozhodnutý na true, pokud bylo smazání úspěšné.
-     */
     public async deleteSave(saveId: string): Promise<boolean> {
-        if (!saveId || typeof saveId !== 'string') {
+        if (!saveId) {
             console.error("SaveManager: Invalid save ID provided for deletion.", saveId);
-            this.eventEmitter.emit(SaveEvents.GAME_DELETED, { saveId, success: false, error: 'invalid id' });
+            const errorData: GameDeletedEventData = { saveId, success: false, error: 'invalid id' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_DELETED, errorData);
             return false;
         }
         try {
             const success = await this.storage.delete(saveId);
-
-            if (success) {
-                console.log(`SaveManager: Game save with id '${saveId}' deleted successfully.`);
-                this.eventEmitter.emit(SaveEvents.GAME_DELETED, { saveId, success: true });
-            } else {
-                console.warn(`SaveManager: Storage reported failure to delete game with id '${saveId}'. May not exist.`);
-                this.eventEmitter.emit(SaveEvents.GAME_DELETED, { saveId, success: false, error: 'storage failed' });
-            }
-
+            const eventData: GameDeletedEventData = { saveId, success, error: success ? undefined : 'storage failed or not found' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_DELETED, eventData);
             return success;
         } catch (error) {
             console.error(`SaveManager: Failed to delete game with id '${saveId}' from storage:`, error);
-            this.eventEmitter.emit(SaveEvents.GAME_DELETED, { saveId, success: false, error });
+            const errorData: GameDeletedEventData = { saveId, success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.GAME_DELETED, errorData);
             return false;
         }
     }
 
-    /**
-     * Provede rychlé uložení pod předdefinovaným ID (quicksave).
-     *
-     * @returns Promise rozhodnutý na true, pokud bylo uložení úspěšné.
-     */
     public async quickSave(): Promise<boolean> {
         console.log("SaveManager: Performing quick save...");
-        // save() metoda již emituje událost
         return await this.save(this.quickSaveId, {
             name: 'Rychlé uložení',
-            // Další metadata pro quicksave
-            isQuickSave: true
+            isQuickSave: true // Příklad custom data v metadatech
         });
     }
 
-    /**
-     * Načte rychlé uložení pod předdefinovaným ID (quicksave).
-     *
-     * @returns Promise rozhodnutý na true, pokud bylo načtení úspěšné.
-     */
     public async quickLoad(): Promise<boolean> {
         console.log("SaveManager: Attempting quick load...");
         try {
             const exists = await this.storage.exists(this.quickSaveId);
             if (!exists) {
                 console.warn('SaveManager: No quicksave found to load.');
-                // Zvažte emitování specifické události nebo jen vrácení false
-                // this.eventEmitter.emit(SaveEvents.GAME_LOADED, { saveId: this.quickSaveId, success: false, error: 'not found' });
+                // Neemitujeme GAME_LOADED error zde, load() to udělá, pokud je voláno
                 return false;
             }
-
-            // load() metoda již emituje událost
             return await this.load(this.quickSaveId);
         } catch (error) {
             console.error("SaveManager: Failed to check existence or load quicksave:", error);
-            // Chyba při exist() nebo load() bude logována a emitována v těchto metodách
+            // Emit error? load() by měl emitovat chybu, pokud selže
             return false;
         }
     }
 
-    /**
-     * Aktivuje automatické ukládání v pravidelných intervalech.
-     *
-     * @param options Nastavení pro automatické ukládání (interval, počet slotů, prefix, callbacky).
-     */
     public enableAutoSave(options: AutoSaveOptions = {}): void {
-        // Deaktivace existujícího automatického ukládání, pokud běží
         this.disableAutoSave();
-
-        // Validace intervalu
-        const interval = options.interval || 5 * 60 * 1000; // Výchozí 5 minut
-        if (interval <= 0) {
-            console.error("SaveManager: Auto-save interval must be a positive number.");
+        const interval = options.interval || 5 * 60 * 1000;
+        const slots = options.slots || 3;
+        if (interval <= 0 || slots <= 0 || !Number.isInteger(slots)) {
+            console.error("SaveManager: Invalid auto-save interval or slots.");
             return;
         }
 
-        // Validace počtu slotů
-        const slots = options.slots || 3; // Výchozí 3 sloty
-        if (slots <= 0 || !Number.isInteger(slots)) {
-            console.error("SaveManager: Auto-save slots must be a positive integer.");
-            return;
-        }
-
-
-        // Uložení nastavení pro automatické ukládání
         this.autoSaveOptions = {
             interval,
             slots,
-            prefix: options.prefix || 'auto', // Výchozí prefix 'auto'
+            prefix: options.prefix || 'auto',
             beforeSave: options.beforeSave,
             afterSave: options.afterSave
         };
 
-        // Spuštění časovače
-        // Použijeme window.setInterval pro kompatibilitu s prohlížečem.
-        // V Node.js je potřeba jiný modul (timers). Pokud engine běží v Node.js,
-        // setInterval/clearInterval můžou být globální nebo z 'timers'.
-        if (typeof setInterval !== 'undefined' && typeof clearInterval !== 'undefined') {
-            this.autoSaveTimer = setInterval(() => {
-                // Asynchronní volání performAutoSave, aby nezablokovalo časovač ani hlavní vlákno
-                this.performAutoSave().catch(error => {
-                    console.error("SaveManager: Uncaught error during auto-save execution:", error);
-                    // Chyba je již logována a emitována v performAutoSave/save
-                });
-            }, this.autoSaveOptions.interval) as any; // Přetypování pro jistotu
-        } else {
-            console.warn("SaveManager: setInterval/clearInterval not available. Auto-save cannot be fully enabled.");
-            // Můžete zde emitovat událost chyby enginu nebo SaveManageru
-            // this.eventEmitter.emit(SaveEvents.AUTO_SAVE_ENABLED, { success: false, error: 'environment not supported' });
-            return; // Nemůžeme nastavit interval
-        }
+        this.autoSaveTimer = setInterval(() => {
+            this.performAutoSave().catch(error => {
+                console.error("SaveManager: Uncaught error during auto-save execution:", error);
+            });
+        }, this.autoSaveOptions.interval);
 
         console.log(`SaveManager: Auto-save enabled with interval ${interval}ms and ${slots} slots.`);
-        this.eventEmitter.emit(SaveEvents.AUTO_SAVE_ENABLED, { options: this.autoSaveOptions });
+        const eventData: AutoSaveEnabledEventData = { options: this.autoSaveOptions };
+        this.engine.getSaveEventEmitter().emit(SaveEvents.AUTO_SAVE_ENABLED, eventData);
     }
 
-    /**
-     * Deaktivuje automatické ukládání.
-     */
     public disableAutoSave(): void {
         if (this.autoSaveTimer !== null) {
-            // Použijeme clearInterval
-            if (typeof clearInterval !== 'undefined') {
-                clearInterval(this.autoSaveTimer as any); // Přetypování pro konzistenci
-            } else {
-                console.warn("SaveManager: clearInterval not available. Cannot disable auto-save timer.");
-            }
+            clearInterval(this.autoSaveTimer);
             this.autoSaveTimer = null;
-            this.autoSaveOptions = null; // Reset nastavení
-            this.autoSaveCounter = 0; // Reset counter
+            this.autoSaveOptions = null;
+            this.autoSaveCounter = 0;
             console.log("SaveManager: Auto-save disabled.");
-            this.eventEmitter.emit(SaveEvents.AUTO_SAVE_DISABLED, {});
+            const eventData: AutoSaveDisabledEventData = {};
+            this.engine.getSaveEventEmitter().emit(SaveEvents.AUTO_SAVE_DISABLED, eventData);
         }
     }
 
-    /**
-     * Provede jedno automatické uložení.
-     * Vybírá slot na základě interního počítadla a nastavení.
-     * @returns Promise rozhodnutý na true, pokud bylo uložení úspěšné.
-     * @private
-     */
     private async performAutoSave(): Promise<boolean> {
-        // Dvojitá kontrola, zda je auto-save stále aktivní
-        if (!this.autoSaveOptions || this.autoSaveTimer === null) {
-            console.log("SaveManager: Auto-save requested, but it's not enabled.");
-            return false;
-        }
+        if (!this.autoSaveOptions || this.autoSaveTimer === null) return false;
 
-        // Kontrola podmínky před uložením (callback může být asynchronní)
-        // beforeSave callback může zabránit uložení (např. pokud je hráč v boji)
         if (this.autoSaveOptions.beforeSave) {
             try {
                 const shouldSave = await Promise.resolve(this.autoSaveOptions.beforeSave());
@@ -4764,189 +3846,125 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
                 }
             } catch (error) {
                 console.error("SaveManager: Error in auto-save beforeSave callback:", error);
-                // Pokud callback selže, uložení se přeskočí.
                 return false;
             }
         }
 
-        // Výpočet ID pro auto-save slot
-        // Použijeme aktuální hodnotu počítadla pro určení slotu
-        const autoSaveSlotIndex = this.autoSaveCounter % (this.autoSaveOptions.slots || 1); // Index slotu (0-based)
-        // Zvýšíme počítadlo pro PŘÍŠTÍ uložení až po určení slotu pro toto uložení.
+        const autoSaveSlotIndex = this.autoSaveCounter % this.autoSaveOptions.slots;
         this.autoSaveCounter++;
-
-        const saveId = `${this.autoSaveOptions.prefix}_${autoSaveSlotIndex}`; // Např. auto_0, auto_1, auto_2
-        const saveName = `Automatické uložení ${autoSaveSlotIndex + 1}`; // Jméno slotu (1-based)
+        const saveId = `${this.autoSaveOptions.prefix}_${autoSaveSlotIndex}`;
+        const saveName = `Automatické uložení ${autoSaveSlotIndex + 1}`;
 
         console.log(`SaveManager: Performing auto-save to slot ${autoSaveSlotIndex + 1} (id: ${saveId}).`);
-
-        // Provedení samotného uložení
         const success = await this.save(saveId, {
             name: saveName,
-            // Další metadata pro auto-save
-            isAutoSave: true,
-            autoSaveSlot: autoSaveSlotIndex + 1
-            // Můžete zde přidat i další metadata specifická pro auto-save, např. timestamp
+            isAutoSave: true, // Příklad custom data
+            autoSaveSlot: autoSaveSlotIndex + 1 // Příklad custom data
         });
 
-        // Callback po uložení (může být asynchronní)
-        if (success) {
-            console.log(`SaveManager: Auto-save to slot ${autoSaveSlotIndex + 1} successful.`);
-            if (this.autoSaveOptions.afterSave) {
-                try {
-                    await Promise.resolve(this.autoSaveOptions.afterSave(saveId));
-                } catch (error) {
-                    console.error("SaveManager: Error in auto-save afterSave callback:", error);
-                    // Chyba v afterSave by neměla způsobit selhání uložení, jen se zaloguje
-                }
+        if (success && this.autoSaveOptions.afterSave) {
+            try {
+                await Promise.resolve(this.autoSaveOptions.afterSave(saveId));
+            } catch (error) {
+                console.error("SaveManager: Error in auto-save afterSave callback:", error);
             }
-        } else {
-            // Chyba při ukládání je již logována a emitována v metodě save()
-            console.error(`SaveManager: Auto-save to slot ${autoSaveSlotIndex + 1} failed.`);
         }
-
         return success;
     }
 
-    /**
-     * Generuje výchozí název pro uloženou hru na základě aktuálního času a scény.
-     *
-     * @returns Výchozí název pro uložení.
-     * @private
-     */
     private generateDefaultSaveName(): string {
         const now = new Date();
-        // Formátování data a času pro název
-        const dateOptions: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'numeric', day: 'numeric' };
-        const timeOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
-        // Použijte locale z enginu nebo default
+        const dateOptions: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit' };
+        const timeOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
         const dateStr = now.toLocaleDateString(undefined, dateOptions);
         const timeStr = now.toLocaleTimeString(undefined, timeOptions);
-
         const sceneTitle = this.engine.getCurrentScene()?.title || 'Neznámá scéna';
-
         return `${sceneTitle} - ${dateStr} ${timeStr}`;
     }
 
-    /**
-     * Aktualizuje celkový čas hraní (`this.totalPlayTime`).
-     * Přidá čas uplynulý od posledního resetu `gameStartTime`.
-     * Volá se před každým uložením.
-     * @private
-     */
     private updatePlayTime(): void {
         const now = Date.now();
-        // Přidá čas, který uplynul od posledního nastavení gameStartTime (např. při startu nebo načtení hry)
-        this.totalPlayTime += now - this.gameStartTime;
-        // Resetuje gameStartTime, aby se při dalším volání updatePlayTime počítal čas od tohoto nového momentu
+        if (this.gameStartTime) { // Přidána kontrola pro jistotu
+            this.totalPlayTime += now - this.gameStartTime;
+        }
         this.gameStartTime = now;
     }
 
     /**
-     * Tato metoda slouží pro migraci *formátu samotných SaveData* (např. struktura metadat),
-     * NIKOLI pro migraci *formátu herního stavu* (což dělá StateMigrationService).
-     * Pokud nemáte migrace formátu SaveData, lze ji smazat nebo zjednodušit.
-     * Aktuálně pouze kontroluje, zda má SaveData metadata a nastaví save Data Format Version, pokud chybí (migrace z verze 0 na 1 SaveData format).
-     * V budoucnu zde mohou být další kroky pro migraci SaveData formatu.
-     *
-     * @param saveData Data uložené hry (SaveData) k migraci.
-     * @returns Migrovaná data uložené hry (SaveData) nebo null/undefined při selhání.
-     * @private
+     * Migruje formát SaveData objektu (metadata atd.), NE formát stavu.
+     * @param saveData Data k migraci.
+     * @returns Migrovaná data nebo null při selhání.
      */
     private migrateSaveDataFormatIfNeeded(saveData: SaveData): SaveData | null {
-        let currentSaveData = { ...saveData }; // Pracujeme s kopií, nebo upravujeme přímo vstup? Upravovat vstup je běžné u migračních funkcí.
+        let currentSaveData = { ...saveData }; // Pracujeme s kopií
 
-        // Zajistíme existenci metadat a verze formátu SaveData
         if (!currentSaveData.metadata) {
-            console.error("SaveManager: SaveData missing metadata.");
-            // Nelze migrovat data bez metadat, považujeme za nevalidní.
+            console.error("SaveManager: Cannot migrate SaveData missing metadata.");
             return null;
         }
 
-        // Pokud chybí saveDataFormatVersion, předpokládáme starší verzi 0 a migrujeme na 1.
-        if (typeof currentSaveData.metadata.saveDataFormatVersion !== 'number') {
-            console.log(`SaveManager: Migrating SaveData format for id '${currentSaveData.metadata.id}' from version 0 to 1.`);
-            currentSaveData.metadata.saveDataFormatVersion = 1; // Nastavíme novou verzi formátu SaveData
+        // Získání nebo inicializace verze SaveData formátu
+        let currentFormatVersion = typeof currentSaveData.metadata.saveDataFormatVersion === 'number'
+            ? currentSaveData.metadata.saveDataFormatVersion
+            : 0; // Předpokládáme verzi 0, pokud chybí
 
-            // V tomto kroku migrace SaveData formatu (0->1) můžeme také přejmenovat staré pole 'saveVersion' na 'stateFormatVersion'
-            // pokud ve starém formátu uložení bylo pole 'saveVersion' v metadatech uložení (SaveMetadata),
-            // které ale ve skutečnosti uchovávalo verzi *stavu* (_metadata.version), nikoli verzi formátu uložení.
-            if (typeof (currentSaveData.metadata as any).saveVersion === 'number') {
-                currentSaveData.metadata.stateFormatVersion = (currentSaveData.metadata as any).saveVersion;
-                delete (currentSaveData.metadata as any).saveVersion;
-                console.log(`SaveManager: Migrated old 'saveVersion' field to 'stateFormatVersion' in SaveData metadata.`);
-            } else if (typeof currentSaveData.metadata.stateFormatVersion !== 'number') {
-                // Pokud ani staré ani nové pole s verzí stavu neexistuje, předpokládáme verzi stavu 0
-                currentSaveData.metadata.stateFormatVersion = 0;
+        // Pokud je verze nižší než aktuální cílová verze SaveData formátu
+        if (currentFormatVersion < this.saveDataFormatVersion) {
+            console.log(`SaveManager: Migrating SaveData format for id '${currentSaveData.metadata.id}' from version ${currentFormatVersion} to ${this.saveDataFormatVersion}.`);
+
+            // Migrace z 0 na 1 (Příklad: přejmenování saveVersion na stateFormatVersion, přidání saveDataFormatVersion)
+            if (currentFormatVersion === 0 && this.saveDataFormatVersion >= 1) {
+                // Přejmenování/přesun 'saveVersion' (pokud existovala a znamenala verzi stavu) na 'stateFormatVersion'
+                if (typeof (currentSaveData.metadata as any).saveVersion === 'number' && typeof currentSaveData.metadata.stateFormatVersion !== 'number') {
+                    currentSaveData.metadata.stateFormatVersion = (currentSaveData.metadata as any).saveVersion;
+                    console.log(`SaveManager: Migrated old 'saveVersion' field to 'stateFormatVersion' in SaveData metadata.`);
+                }
+                delete (currentSaveData.metadata as any).saveVersion; // Odstranění starého pole
+
+                // Nastavení saveDataFormatVersion na 1
+                currentSaveData.metadata.saveDataFormatVersion = 1;
+                currentFormatVersion = 1; // Aktualizace pro další případné migrace
+                console.log(`SaveManager: Applied SaveData format migration from 0 to 1.`);
             }
 
-            // Zkopírovat nebo nastavit další pole přidaná ve verzi 1 SaveData formatu, pokud je potřeba.
-            // Např. pokud ve v1 SaveData formatu přibylo pole 'engineVersion' v metadatech, které ve v0 chybělo.
-            if (!currentSaveData.metadata.engineVersion && typeof this.engine.getVersion === 'function') {
-                currentSaveData.metadata.engineVersion = this.engine.getVersion();
+            // Zde přidat další migrační kroky pro SaveData formát (např. 1 -> 2)
+            // if (currentFormatVersion === 1 && this.saveDataFormatVersion >= 2) {
+            //     // ... logika migrace SaveData formátu 1 -> 2 ...
+            //     currentSaveData.metadata.saveDataFormatVersion = 2;
+            //     currentFormatVersion = 2;
+            //     console.log(`SaveManager: Applied SaveData format migration from 1 to 2.`);
+            // }
+
+            // Kontrola, zda migrace dosáhla cílové verze
+            if (currentFormatVersion !== this.saveDataFormatVersion) {
+                console.warn(`SaveManager: Could not fully migrate SaveData format to target version ${this.saveDataFormatVersion}. Current version after migration: ${currentFormatVersion}.`);
+                // Můžete se rozhodnout vrátit null nebo částečně migrovaná data
             }
         }
 
-        // Zde by se implementovaly další kroky migrace SaveData formatu (1->2, 2->3, atd.)
-        // let currentFormatVersion = currentSaveData.metadata.saveDataFormatVersion;
-        // for (let v = currentFormatVersion; v < this.saveDataFormatVersion; v++) {
-        //    const nextVersion = v + 1;
-        //    if (nextVersion === 2) {
-        //       // Implementace migrace SaveData formatu z 1 na 2
-        //       console.log(`SaveManager: Applying SaveData format migration from ${v} to ${nextVersion}`);
-        //       // Např.: Přidání nového pole 'screenshot' do metadat
-        //       if (!currentSaveData.metadata.screenshot) {
-        //           currentSaveData.metadata.screenshot = 'placeholder';
-        //       }
-        //       currentSaveData.metadata.saveDataFormatVersion = nextVersion; // Aktualizace verze
-        //    } else {
-        //       console.warn(`SaveManager: No SaveData format migration defined for version ${v} to ${nextVersion}. Cannot fully migrate SaveData format.`);
-        //       // Můžete zvážit, zda v takovém případě vyhodit chybu nebo vrátit částečně migrovaná data.
-        //       // Prozatím jen varování a pokračování.
-        //    }
-        // }
+        // Zajistíme, že stateFormatVersion existuje (pro stará uložení bez něj)
+        if (typeof currentSaveData.metadata.stateFormatVersion !== 'number') {
+            console.warn(`SaveManager: SaveData metadata for id '${currentSaveData.metadata.id}' missing 'stateFormatVersion'. Assuming version 0.`);
+            currentSaveData.metadata.stateFormatVersion = 0;
+        }
 
 
-        // Pokud žádná migrace SaveData formatu není potřeba nebo byla dokončena:
         return currentSaveData;
     }
 
 
-    /**
-     * Vrátí aktuální čas hraní v milisekundách.
-     *
-     * @returns Aktuální čas hraní v milisekundách.
-     */
     public getPlayTime(): number {
-        // Čas hraní je součet totalPlayTime (čas zaznamenaný do posledního uložení/načtení)
-        // a času, který uplynul od posledního nastavení gameStartTime (čas aktuálního běhu).
-        return this.totalPlayTime + (Date.now() - this.gameStartTime);
+        return this.totalPlayTime + (Date.now() - (this.gameStartTime || Date.now())); // Přidána fallback hodnota pro gameStartTime
     }
 
-    /**
-     * Naformátuje čas hraní z milisekund do čitelné podoby (např. "HH:MM:SS").
-     * Tato metoda by ideálně měla být v save/utils.ts a zde jen volána nebo reexportována.
-     * Ponechána pro zachování původního API.
-     *
-     * @param timeMs Volitelný čas v milisekundách k formátování. Pokud není uveden, použije se aktuální čas hraní.
-     * @returns Naformátovaný čas ve formátu "HH:MM:SS" nebo delší/kratší, v závislosti na implementaci utils.
-     */
     public formatPlayTime(timeMs?: number): string {
-        // Použijeme externí utilitu z save/utils.ts, pokud existuje.
-        // Tím se zajistí konzistence formátování.
-        // Pokud utils.ts neobsahuje formatPlayTime, implementujte ji zde nebo ji přidejte do utils.
-        // Předpokládáme, že existuje utility funkce: import { formatPlayTime as formatTimeUtil } from './utils';
+        // Použijeme utilitu z utils
         const time = timeMs !== undefined ? timeMs : this.getPlayTime();
-
-        // Zde byste měli volat externí formatovací utilitu
-        // return formatTimeUtil(time, 'medium');
-
-        // Dočasná jednoduchá implementace pro případ, že utils utilita neexistuje:
+        // return formatPlayTimeUtil(time); // Předpokládá existenci formatPlayTimeUtil v utils
+        // Dočasná implementace:
         const seconds = Math.floor((time / 1000) % 60);
         const minutes = Math.floor((time / (1000 * 60)) % 60);
         const hours = Math.floor(time / (1000 * 60 * 60));
-        // const days = Math.floor(time / (1000 * 60 * 60 * 24));
-
         return [
             hours.toString().padStart(2, '0'),
             minutes.toString().padStart(2, '0'),
@@ -4954,97 +3972,52 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
         ].join(':');
     }
 
-    /**
-     * Vymaže všechna uložení z úložiště.
-     *
-     * @returns Promise rozhodnutý na true, pokud bylo smazání všech uložení úspěšné.
-     */
     public async clearAllSaves(): Promise<boolean> {
         console.log("SaveManager: Attempting to clear all saves...");
         try {
-            // Můžete zkusit zavolat metodu clearAll() přímo na úložišti, pokud ji implementuje,
-            // nebo iterovat a mazat jednotlivě jako v původním kódu. clearAll je efektivnější.
+            let success = false;
             if (typeof this.storage.clearAll === 'function') {
-                const success = await this.storage.clearAll();
-                if (success) {
-                    console.log("SaveManager: All saves cleared successfully.");
-                    this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: true });
-                } else {
-                    console.warn("SaveManager: Storage reported failure to clear all saves.");
-                    this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: false, error: 'storage failed' });
-                }
-                return success;
+                success = await this.storage.clearAll();
             } else {
-                // Alternativní implementace pomocí list a delete, pokud storage.clearAll neexistuje
-                console.log("SaveManager: Storage does not support clearAll. Deleting saves individually.");
+                console.warn("SaveManager: Storage does not implement clearAll. Deleting saves individually.");
                 const saves = await this.getSaves();
                 const saveIds = Object.keys(saves);
-
                 if (saveIds.length === 0) {
-                    console.log("SaveManager: No saves to clear individually.");
-                    this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: true });
-                    return true; // Nic ke smazání
-                }
-
-                const results = await Promise.all(
-                    saveIds.map(id => this.deleteSave(id))
-                );
-
-                const allSuccessful = results.every(result => result);
-
-                if (allSuccessful) {
-                    console.log("SaveManager: All saves cleared successfully (individually).");
-                    this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: true });
+                    success = true; // Nic ke smazání
                 } else {
-                    console.error("SaveManager: Not all saves were successfully cleared individually.");
-                    this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: false, error: 'partial failure' });
+                    const results = await Promise.all(saveIds.map(id => this.deleteSave(id)));
+                    success = results.every(result => result);
                 }
-
-                return allSuccessful;
             }
+
+            console.log(`SaveManager: Clear all saves ${success ? 'successful' : 'failed'}.`);
+            const eventData: AllSavesClearedEventData = { success, error: success ? undefined : 'clear failed' };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.ALL_SAVES_CLEARED, eventData);
+            return success;
 
         } catch (error) {
             console.error("SaveManager: Failed to clear all saves:", error);
-            this.eventEmitter.emit(SaveEvents.ALL_SAVES_CLEARED, { success: false, error });
+            const eventData: AllSavesClearedEventData = { success: false, error };
+            this.engine.getSaveEventEmitter().emit(SaveEvents.ALL_SAVES_CLEARED, eventData);
             return false;
         }
     }
 
-    /**
-     * Vrátí používané úložiště.
-     *
-     * @returns Úložiště používané tímto SaveManagerem.
-     */
     public getStorage(): SaveStorage {
         return this.storage;
     }
 
-    /**
-     * Nastaví nové úložiště.
-     * Může být užitečné pro přepínání mezi různými typy úložišť během běhu aplikace.
-     *
-     * @param storage Nové úložiště.
-     */
     public setStorage(storage: SaveStorage): void {
         this.storage = storage;
         console.log("SaveManager: Storage changed.");
-        this.eventEmitter.emit(SaveEvents.STORAGE_CHANGED, { storage });
+        const eventData: StorageChangedEventData = { storage };
+        this.engine.getSaveEventEmitter().emit(SaveEvents.STORAGE_CHANGED, eventData);
     }
 
-    /**
-     * Vrátí aktuální verzi formátu dat uložení (SaveData format).
-     * Toto je verze struktury kontejneru uložených dat (metadata, pole state string).
-     * @returns Verze formátu dat uložení.
-     */
     public getSaveDataFormatVersion(): number {
         return this.saveDataFormatVersion;
     }
 
-    /**
-     * Vrátí aktuální verzi formátu stavu, jak ji spravuje StateMigrationService.
-     * Toto je verze struktury serializovaného stavu (obsahující variables, visitedScenes atd.).
-     * @returns Verze formátu stavu.
-     */
     public getStateFormatVersion(): number {
         return this.stateMigrationService.getCurrentStateFormatVersion();
     }
@@ -5057,54 +4030,30 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
  * Obsahuje informace o uložené hře bez herního stavu samotného
  */
 export interface SaveMetadata {
-    /**
-     * Unikátní identifikátor uložené hry
-     */
+    /** Unikátní identifikátor uložené hry */
     id: string;
-
-    /**
-     * Název nebo popis uložené hry
-     */
+    /** Název nebo popis uložené hry */
     name: string;
-
-    /**
-     * Časové razítko vytvoření uložené hry
-     */
+    /** Časové razítko vytvoření uložené hry */
     createdAt: number;
-
-    /**
-     * Časové razítko poslední aktualizace uložené hry
-     */
+    /** Časové razítko poslední aktualizace uložené hry */
     updatedAt: number;
-
-    /**
-     * Celkový čas strávený hrou v milisekundách
-     */
+    /** Celkový čas strávený hrou v milisekundách */
     playTime: number;
-
-    /**
-     * Verze enginu, ve které byla hra uložena
-     */
+    /** Verze enginu, ve které byla hra uložena */
     engineVersion: string;
 
-    /**
-     * Verze formátu uložené hry
-     */
-    saveVersion: number;
+    /** Verze formátu struktury uložených dat (SaveData). */
+    saveDataFormatVersion: number; // <--- Přidáno/Přejmenováno
 
-    /**
-     * Klíč aktuální scény v době uložení
-     */
+    /** Verze formátu herního stavu (pro migraci stavu). */
+    stateFormatVersion: number; // <--- Přidáno/Přejmenováno
+
+    /** Klíč aktuální scény v době uložení */
     currentSceneKey: string | null;
-
-    /**
-     * Thumbnail nebo obrázek reprezentující uloženou hru (volitelné)
-     */
+    /** Thumbnail nebo obrázek reprezentující uloženou hru (volitelné) */
     thumbnail?: string;
-
-    /**
-     * Další vlastnosti specifické pro konkrétní hru nebo implementaci úložiště
-     */
+    /** Další vlastnosti specifické pro konkrétní hru nebo implementaci úložiště */
     [key: string]: any;
 }
 
@@ -5112,19 +4061,11 @@ export interface SaveMetadata {
  * Reprezentace uložené hry včetně herního stavu
  */
 export interface SaveData {
-    /**
-     * Metadata o uložené hře
-     */
+    /** Metadata o uložené hře */
     metadata: SaveMetadata;
-
-    /**
-     * Serializovaný herní stav
-     */
+    /** Serializovaný herní stav */
     state: string;
-
-    /**
-     * Volitelné dodatečné údaje specifické pro implementaci úložiště
-     */
+    /** Volitelné dodatečné údaje specifické pro implementaci úložiště */
     [key: string]: any;
 }
 
@@ -5132,20 +4073,11 @@ export interface SaveData {
  * Možnosti pro vytvoření nové uložené hry
  */
 export interface SaveOptions {
-    /**
-     * Název nebo popis uložené hry (volitelné)
-     * Pokud není uveden, bude použit aktuální datum a čas
-     */
+    /** Název nebo popis uložené hry (volitelné) */
     name?: string;
-
-    /**
-     * Thumbnail nebo obrázek reprezentující uloženou hru (volitelné)
-     */
+    /** Thumbnail nebo obrázek reprezentující uloženou hru (volitelné) */
     thumbnail?: string;
-
-    /**
-     * Další možnosti specifické pro implementaci úložiště
-     */
+    /** Další možnosti specifické pro implementaci úložiště */
     [key: string]: any;
 }
 
@@ -5153,38 +4085,17 @@ export interface SaveOptions {
  * Nastavení pro automatické ukládání
  */
 export interface AutoSaveOptions {
-    /**
-     * Interval v milisekundách mezi automatickými uloženími
-     * Výchozí hodnota je 5 minut
-     */
+    /** Interval v milisekundách mezi automatickými uloženími */
     interval?: number;
-
-    /**
-     * Maximální počet automatických uložení
-     * Výchozí hodnota je 3
-     */
+    /** Maximální počet automatických uložení */
     slots?: number;
-
-    /**
-     * Prefix pro názvy automatických uložení
-     * Výchozí hodnota je 'auto'
-     */
+    /** Prefix pro názvy automatických uložení */
     prefix?: string;
-
-    /**
-     * Callback volaný před automatickým uložením
-     * Může být použit k rozhodnutí, zda automatické uložení provést
-     */
+    /** Callback volaný před automatickým uložením */
     beforeSave?: () => boolean | Promise<boolean>;
-
-    /**
-     * Callback volaný po automatickém uložení
-     */
+    /** Callback volaný po automatickém uložení */
     afterSave?: (saveId: string) => void | Promise<void>;
-
-    /**
-     * Další možnosti specifické pro implementaci úložiště
-     */
+    /** Další možnosti specifické pro implementaci úložiště */
     [key: string]: any;
 }
 
@@ -5192,45 +4103,18 @@ export interface AutoSaveOptions {
  * Metody pro práci s úložištěm uložených her
  */
 export interface SaveStorage {
-    /**
-     * Uloží data do úložiště
-     *
-     * @param id Identifikátor uložené hry
-     * @param data Data k uložení
-     * @returns Promise rozhodnutý na true, pokud bylo uložení úspěšné
-     */
+    /** Uloží data do úložiště */
     save(id: string, data: SaveData): Promise<boolean>;
-
-    /**
-     * Načte data z úložiště
-     *
-     * @param id Identifikátor uložené hry
-     * @returns Promise rozhodnutý na data, nebo null pokud uložená hra neexistuje
-     */
+    /** Načte data z úložiště */
     load(id: string): Promise<SaveData | null>;
-
-    /**
-     * Vrátí seznam všech uložených her
-     *
-     * @returns Promise rozhodnutý na objekt mapující ID na metadata
-     */
+    /** Vrátí seznam všech uložených her */
     list(): Promise<Record<string, SaveMetadata>>;
-
-    /**
-     * Smaže uloženou hru
-     *
-     * @param id Identifikátor uložené hry
-     * @returns Promise rozhodnutý na true, pokud bylo smazání úspěšné
-     */
+    /** Smaže uloženou hru */
     delete(id: string): Promise<boolean>;
-
-    /**
-     * Zkontroluje, zda existuje uložená hra s daným ID
-     *
-     * @param id Identifikátor uložené hry
-     * @returns Promise rozhodnutý na true, pokud uložená hra existuje
-     */
+    /** Zkontroluje, zda existuje uložená hra s daným ID */
     exists(id: string): Promise<boolean>;
+    /** (Volitelné) Vymaže všechna uložení */
+    clearAll?: () => Promise<boolean>;
 }
 
 /**
@@ -5245,6 +4129,52 @@ export enum SaveEvents {
     ALL_SAVES_CLEARED = 'save:allSavesCleared',
     STORAGE_CHANGED = 'save:storageChanged'
 }
+
+// Přidání typů pro data událostí SaveManageru (příklad)
+export interface GameSavedEventData {
+    saveId: string;
+    metadata?: SaveMetadata; // Metadata mohou chybět při selhání před jejich vytvořením
+    success: boolean;
+    error?: any;
+}
+
+export interface GameLoadedEventData {
+    saveId: string;
+    metadata?: SaveMetadata; // Metadata jsou dostupná jen při úspěchu
+    success: boolean;
+    error?: any;
+}
+
+export interface GameDeletedEventData {
+    saveId: string;
+    success: boolean;
+    error?: any;
+}
+
+export interface AutoSaveEnabledEventData {
+    options: AutoSaveOptions;
+}
+export interface AutoSaveDisabledEventData {}
+
+export interface AllSavesClearedEventData {
+    success: boolean;
+    error?: any;
+}
+
+export interface StorageChangedEventData {
+    storage: SaveStorage;
+}
+
+// Mapa událostí pro SaveManager
+export type SaveEventMap = {
+    [SaveEvents.GAME_SAVED]: GameSavedEventData;
+    [SaveEvents.GAME_LOADED]: GameLoadedEventData;
+    [SaveEvents.GAME_DELETED]: GameDeletedEventData;
+    [SaveEvents.AUTO_SAVE_ENABLED]: AutoSaveEnabledEventData;
+    [SaveEvents.AUTO_SAVE_DISABLED]: AutoSaveDisabledEventData;
+    [SaveEvents.ALL_SAVES_CLEARED]: AllSavesClearedEventData;
+    [SaveEvents.STORAGE_CHANGED]: StorageChangedEventData;
+};
 </file>
 
 <file path="src/save/utils.ts">
@@ -5778,86 +4708,64 @@ export * from './utils';
 </file>
 
 <file path="src/state/persistence/StateConverter.ts">
-import { GameState } from '../types'; // Import GameState from runtime types
+import { GameState } from '../types';
 import {
     PersistedState,
     StateMetadata,
     SerializationOptions,
     StateManagerPersistenceEvents
 } from './types';
-import { StateMigrationService } from './StateMigrationService'; // Import Migration Service
-import { TypedEventEmitter } from '../../event/TypedEventEmitter';
+import { StateMigrationService } from './StateMigrationService';
+import { TypedEventEmitter } from '../../event/TypedEventEmitter'; // Zkontroluj název souboru/třídy
 
 /**
  * Služba zodpovědná za převod mezi runtime GameState a serializovatelnou PersistedState a zpět.
- * Zahrnuje logiku serializace (GameState -> JSON string) a deserializace (JSON string -> PersistedState po migraci).
- * Tato třída je navržena jako statická/singleton.
  */
 export class StateConverter {
-    /**
-     * Zabrání vytvoření instance.
-     */
     private constructor() {}
 
-    /**
-     * Statická metoda pro serializaci GameState do JSON stringu.
-     * Vytvoří PersistedState objekt obsahující pouze perzistentní klíče a metadata.
-     * @template T Typ proměnných stavu.
-     * @param state Aktuální runtime GameState.
-     * @param persistentKeys Seznam klíčů (z GameStateManageru), které se mají serializovat.
-     * @param options Možnosti serializace (zahrnutí metadat, replacer funkce).
-     * @param onBeforeSerializeCallback Callback volaný PŘED zahájením serializace.
-     * @param eventEmitter Volitelný event emitter pro emitování událostí serializace.
-     * @returns JSON řetězec reprezentující perzistentní stav.
-     */
     public static serialize<T extends Record<string, unknown>>(
         state: GameState<T>,
         persistentKeys: string[],
         options: SerializationOptions = {},
         onBeforeSerializeCallback?: (state: GameState<T>) => void,
+        // Přijímá typovaný emitter
         eventEmitter?: TypedEventEmitter<StateManagerPersistenceEvents<T>>
     ): string {
         const { includeMetadata = true, replacer } = options;
 
-        // Volání callbacku před serializací (pokud je poskytnut)
         if (onBeforeSerializeCallback) {
-            onBeforeSerializeCallback(state);
+            try {
+                onBeforeSerializeCallback(state);
+            } catch (error) {
+                console.error("Error in onBeforeSerialize callback:", error);
+                // Pokračovat v serializaci i přes chybu v callbacku? Záleží na požadavcích.
+            }
         }
 
-        // Emitování události před serializací (pokud je poskytnut emitter)
         eventEmitter?.emit('beforeSerialize', { state });
 
-        // Vytvoření objektu pro serializaci - bude obsahovat jen perzistentní data
         const serializableState: PersistedState<T> = {} as PersistedState<T>;
 
-        // Přidání pouze perzistentních klíčů ze stavu
         for (const key of persistentKeys) {
-            // Zajištění, že klíč existuje ve stavu, než se pokusíme o serializaci
             if (key in state) {
                 const value = (state as any)[key];
                 if (key === 'visitedScenes') {
-                    // Speciální zpracování: Set<string> -> Array<string>
                     serializableState.visitedScenes = this.convertSetToArray(value);
                 } else if (key === 'variables') {
-                    // Speciální zpracování: variables (typ T)
-                    // Zde předpokládáme, že T je přímo serializovatelné nebo obsahuje serializovatelné typy
                     serializableState.variables = value as T;
                 } else {
-                    // Ostatní perzistentní klíče - kopírování hodnoty
-                    (serializableState as any)[key] = value; // Použití any kvůli dynamickému přístupu
+                    (serializableState as any)[key] = value;
                 }
             } else {
-                // Volitelné: Varování, pokud perzistentní klíč neexistuje ve stavu
                 console.warn(`StateConverter: Persistent key '${key}' not found in GameState during serialization.`);
             }
         }
 
-        // Přidání metadat, pokud je požadováno
         if (includeMetadata) {
             serializableState._metadata = this.createStateMetadata();
         }
 
-        // Vrací JSON řetězec, potenciálně s custom replacerem
         try {
             return JSON.stringify(serializableState, replacer);
         } catch (error) {
@@ -5866,24 +4774,13 @@ export class StateConverter {
         }
     }
 
-    /**
-     * Statická metoda pro deserializaci JSON stringu do PersistedState (po migraci).
-     * Volá StateMigrationService pro migraci načtených dat na aktuální verzi.
-     * @template T Typ cílových proměnných stavu (po migraci).
-     * @param serializedState Serializovaný stav v JSON formátu.
-     * @param options Možnosti deserializace (aktuálně se příliš nepoužívají, ale ponechány pro konzistenci).
-     * @param onAfterDeserializeCallback Callback volaný PO dokončení deserializace A migrace.
-     * @param eventEmitter Volitelný event emitter pro emitování událostí deserializace/migrace.
-     * @returns Migrovaný stav ve formátu PersistedState<T>.
-     * @throws Chyba při selhání parsování JSON nebo migraci.
-     */
     public static deserialize<T extends Record<string, unknown>>(
         serializedState: string,
         options: SerializationOptions = {},
-        onAfterDeserializeCallback?: (state: GameState<T>) => void, // Callback má signature pro GameState, zvažte jeho umístění
-        eventEmitter?: TypedEventEmitter<StateManagerPersistenceEvents<T>> // Emitter for Persistence events
+        onAfterDeserializeCallback?: (state: GameState<T>) => void, // Stále zde, ale volá se z GameStateManageru
+        // Přijímá typovaný emitter
+        eventEmitter?: TypedEventEmitter<StateManagerPersistenceEvents<T>>
     ): PersistedState<T> {
-        // 1. Parsování JSON řetězce
         let parsedState: PersistedState<unknown>;
         try {
             parsedState = JSON.parse(serializedState) as PersistedState<unknown>;
@@ -5892,50 +4789,36 @@ export class StateConverter {
             throw new Error("Invalid serialized state format");
         }
 
-        // 2. Migrace stavu na aktuální verzi
-        // StateMigrationService.migrate pracuje s PersistedState<unknown>
         const targetVersion = StateMigrationService.getCurrentStateFormatVersion();
         let migratedState: PersistedState<unknown>;
         try {
+            // Předání typovaného emitteru migraci
             migratedState = StateMigrationService.migrate(
-                parsedState, // Input state (může být modifikován migračními funkcemi)
+                parsedState,
                 targetVersion,
-                eventEmitter as TypedEventEmitter<StateManagerPersistenceEvents<unknown>> // Přetypování emitteru pro migrate
+                // StateMigrationService očekává emitter pro <unknown>
+                eventEmitter as TypedEventEmitter<StateManagerPersistenceEvents<unknown>> | undefined
             );
         } catch (error) {
             console.error(`StateConverter: Failed to migrate state to version ${targetVersion}.`, error);
-            // Chyba migrace již byla zalogována v migrate(), re-throw
             throw error;
         }
 
-
-        // Emitování události po deserializaci a migraci (pokud je poskytnut emitter)
-        // Callback onAfterDeserializeCallback je zde problematický, protože nemáme GameState.
-        // Měl by být volán až po aplikaci migratedState na GameStateManager.
-        // Odkaz na něj zde nemá smysl a měl by být odstraněn z parametrů a volání.
+        // Emitování události po deserializaci a migraci
         eventEmitter?.emit('afterDeserialize', { state: migratedState as PersistedState<T> });
 
-        // Vrací migrovaný PersistedState objekt, připravený k aplikaci na GameStateManager
+        // Callback onAfterDeserialize se už zde nevolá, volá ho GameStateManager.applyPersistentState
+
         return migratedState as PersistedState<T>;
     }
 
-    /**
-     * Vytvoří metadata o stavu pro serializaci.
-     * @returns Objekt StateMetadata.
-     */
     private static createStateMetadata(): StateMetadata {
         return {
-            version: StateMigrationService.getCurrentStateFormatVersion(), // Použije aktuální verzi z MigrationService
+            version: StateMigrationService.getCurrentStateFormatVersion(),
             timestamp: Date.now()
         };
     }
 
-    /**
-     * Pomocná metoda pro převod Set<string> nebo Array<string> na Array<string> pro serializaci.
-     * @param setOrArray Vstupní data
-     * @returns Pole stringů
-     * @private
-     */
     private static convertSetToArray(setOrArray: Set<string> | string[] | undefined): string[] {
         if (setOrArray instanceof Set) {
             return Array.from(setOrArray);
@@ -5943,17 +4826,11 @@ export class StateConverter {
         if (Array.isArray(setOrArray)) {
             return setOrArray;
         }
-        // Pokud to není ani Set ani Array, vrátíme prázdné pole nebo zvážíme chybu/varování
         if (setOrArray !== undefined && setOrArray !== null) {
-            console.warn("StateConverter: Expected Set<string> or Array<string> for visitedScenes, but received", setOrArray, ". Serializing as empty array.");
+            console.warn("StateConverter: Expected Set<string> or Array<string> for visitedScenes, received", typeof setOrArray);
         }
         return [];
     }
-
-    // Metoda convertArrayToSet se již nepoužívá v StateConverter, přesunuta do GameStateManager.applyPersistentState
-    /*
-    private static convertArrayToSet(...) { ... }
-    */
 }
 </file>
 
@@ -5964,38 +4841,17 @@ import {
     StateMigrationFn,
     StateManagerPersistenceEvents
 } from './types';
-import { TypedEventEmitter } from '../../event/TypedEventEmitter';
+import { TypedEventEmitter } from '../../event/TypedEventEmitter'; // Zkontroluj název souboru/třídy
 
-/**
- * Aktuální verze formátu persistovaného stavu.
- * Měla by se inkrementovat při každé změně struktury stavu, která vyžaduje migraci.
- */
-const CURRENT_STATE_FORMAT_VERSION = 1; // Přejmenováno pro jasnost
+const CURRENT_STATE_FORMAT_VERSION = 1;
 
 /**
  * Služba zodpovědná za správu a aplikaci migračních funkcí pro persistovaný stav.
- * Tato třída je navržena jako statická/singleton pro správu globální mapy migrací.
  */
 export class StateMigrationService {
-    /**
-     * Statická mapa migračních funkcí.
-     * Klíčem je verze stavu *před* aplikací migrace (fromVersion).
-     * Hodnota je migrační funkce, která transformuje stav z `fromVersion` na `fromVersion + 1`.
-     */
     private static migrations = new Map<number, StateMigrationFn>();
-
-    /**
-     * Zabrání vytvoření instance, jelikož jde o statickou službu.
-     */
     private constructor() {}
 
-    /**
-     * Registruje migrační funkci pro konkrétní verzi stavu.
-     * Migrační funkce by měla transformovat stav z `fromVersion` na `fromVersion + 1`.
-     * @param fromVersion Zdrojová verze (verze před aplikací migrace).
-     * @param migrationFn Migrační funkce.
-     * @returns Funkce pro odregistraci migrace.
-     */
     public static registerMigration(fromVersion: number, migrationFn: StateMigrationFn): () => boolean {
         if (StateMigrationService.migrations.has(fromVersion)) {
             console.warn(`StateMigrationService: Migration for version ${fromVersion} is already registered. Overwriting.`);
@@ -6004,122 +4860,76 @@ export class StateMigrationService {
         return () => StateMigrationService.unregisterMigration(fromVersion);
     }
 
-    /**
-     * Odregistruje migrační funkci pro konkrétní verzi stavu.
-     * @param fromVersion Zdrojová verze.
-     * @returns True pokud byla migrace úspěšně odregistrována, jinak False.
-     */
     public static unregisterMigration(fromVersion: number): boolean {
         return StateMigrationService.migrations.delete(fromVersion);
     }
 
-    /**
-     * Získá aktuální verzi formátu persistovaného stavu, kterou PersistenceService používá.
-     * @returns Aktuální verze stavu.
-     */
-    public static getCurrentStateFormatVersion(): number { // Přejmenováno pro jasnost
+    public static getCurrentStateFormatVersion(): number {
         return CURRENT_STATE_FORMAT_VERSION;
     }
 
-    /**
-     * Migruje persistovaný stav na cílovou verzi.
-     * Postupně aplikuje registrované migrační funkce od verze stavu až po cílovou verzi.
-     * @param state Stav k migraci (očekává PersistedState<unknown> s volitelnými metadaty). Může být modifikován!
-     * @param targetVersion Cílová verze migrace (obvykle CURRENT_STATE_FORMAT_VERSION).
-     * @param eventEmitter Volitelný event emitter pro emitování událostí migrace.
-     * @returns Migrovaný stav ve formátu PersistedState<unknown>. Vrací referenci na (potenciálně modifikovaný) vstupní objekt, pokud nedošlo k chybě.
-     * @throws Error pokud migrace selže (např. chybí migrační funkce nebo dojde k chybě uvnitř migrační funkce).
-     */
     public static migrate(
         state: PersistedState<unknown>,
         targetVersion: number = CURRENT_STATE_FORMAT_VERSION,
-        eventEmitter?: TypedEventEmitter<StateManagerPersistenceEvents<unknown>> // Použijeme generic <unknown> zde, jelikož typ T není znám na statické úrovni
+        // Přijímá typovaný emitter pro <unknown>
+        eventEmitter?: TypedEventEmitter<StateManagerPersistenceEvents<unknown>>
     ): PersistedState<unknown> {
+        let migratedState = state; // Pracujeme s referencí, migrační funkce by měly být čisté nebo pracovat s kopiemi
 
-        // Pracujeme přímo s referencí na vstupní objekt.
-        // Migrační funkce by se měly postarat o immutable aktualizace, pokud je to potřeba
-        // (např. pomocí utilit z persistence/utils, které vytváří kopie).
-        let migratedState = state;
-
-
-        // Pokud stav nemá metadata, přidáme je s výchozí verzí 0
         if (!migratedState._metadata) {
+            console.warn("StateMigrationService: State is missing _metadata. Assuming version 0.");
             migratedState._metadata = { version: 0, timestamp: Date.now() };
         }
 
         let currentStateVersion = migratedState._metadata.version;
 
-        // Pokud je verze stavu již na cílové verzi nebo vyšší, není potřeba migrace
         if (currentStateVersion >= targetVersion) {
             if (currentStateVersion > targetVersion) {
                 console.warn(`StateMigrationService: State version (${currentStateVersion}) is higher than target version (${targetVersion}). No migration applied.`);
-            } else {
-                console.log(`StateMigrationService: State is already at target version ${targetVersion}. No migration needed.`);
             }
+            // No migration needed if versions match
             return migratedState;
         }
 
         console.log(`StateMigrationService: Migrating state from version ${currentStateVersion} to ${targetVersion}`);
 
-        // Postupně aplikujeme migrační funkce
-        // Iterujeme od aktuální verze stavu (včetně) až po *před* cílovou verzi
         for (let v = currentStateVersion; v < targetVersion; v++) {
-            const migrationFn = StateMigrationService.migrations.get(v); // Hledáme migraci pro verzi 'v' -> 'v+1'
+            const migrationFn = StateMigrationService.migrations.get(v);
 
             if (migrationFn) {
                 console.log(`StateMigrationService: Applying migration from version ${v} to ${v + 1}`);
                 try {
-                    // Aplikujeme migrační funkci na aktuální migrovaný stav.
-                    // Migrační funkce by měla vrátit nový objekt nebo modifikovat vstupní kopii.
-                    // Utlity v persistence/utils vytváří kopie.
+                    // Migrační funkce může modifikovat migratedState nebo vrátit nový
                     migratedState = migrationFn(migratedState, v, v + 1);
 
-                    // Aktualizujeme verzi v metadatech pracovní kopie po úspěšné migraci
-                    // Důležité: Migrační funkce by neměla měnit verzi! To je zodpovědnost migrační služby.
+                    // Aktualizace verze v metadatech migrovaného stavu
                     if (!migratedState._metadata) {
-                        // Toto by se nemělo stávat, pokud předchozí kroky migrace byly správné,
-                        // ale přidáme metadata zpět pro robustnost.
+                        // Mělo by být vytvořeno v prvním kroku, pokud chybělo
                         migratedState._metadata = { version: v + 1, timestamp: Date.now() };
                     } else {
-                        migratedState._metadata.version = v + 1; // Nastaví novou verzi
+                        migratedState._metadata.version = v + 1;
                     }
 
-
-                    // Emitování události o aplikaci migrace
-                    // Emitujeme s nově aktualizovanou verzí
+                    // Emitování události
                     eventEmitter?.emit('migrationApplied', {
                         fromVersion: v,
                         toVersion: v + 1,
-                        state: migratedState // Emitujeme stav po aplikaci jednoho kroku
+                        state: migratedState // Emitujeme stav po aplikaci kroku
                     });
-
 
                 } catch (migrationError) {
                     console.error(`StateMigrationService: Migration from version ${v} to ${v + 1} failed:`, migrationError);
-                    // Důležité: Pokud migrace selže, měli bychom zastavit proces a vyhodit chybu.
-                    throw migrationError; // Zastavíme proces a signalizujeme chybu
+                    throw migrationError;
                 }
-
             } else {
-                console.error(`StateMigrationService: No migration function found for version ${v} to ${v + 1}. Cannot complete migration to version ${targetVersion}. State may be incomplete or incorrect.`);
-                // Pokud chybí migrace, stav nemůže být plně migrován.
-                // Měli bychom zastavit proces a vyhodit chybu.
-                throw new Error(`StateMigrationService: Missing migration function for version ${v} to ${v + 1}`);
+                const errorMsg = `StateMigrationService: Missing migration function for version ${v} to ${v + 1}`;
+                console.error(errorMsg);
+                throw new Error(errorMsg);
             }
         }
 
-        // Konečná verze v metadatech by měla být targetVersion
-        if (migratedState._metadata) {
-            migratedState._metadata.version = targetVersion;
-        } else {
-            // Metadata by měla existovat po prvním kroku, ale pro jistotu
-            migratedState._metadata = { version: targetVersion, timestamp: Date.now() };
-        }
-
-
         console.log(`StateMigrationService: Migration complete. State is now version ${targetVersion}.`);
-
-        return migratedState; // Vrací finálně migrovaný objekt
+        return migratedState;
     }
 }
 </file>
@@ -6526,85 +5336,45 @@ import {
     GameStateManagerOptions,
     DEFAULT_PERSISTENT_KEYS,
     StateChangedEvent,
-    GameStateManagerEvents
-} from './types'; lu
-import { PersistedState } from './persistence/types'; // Import Persistence types z 'state/persistence' podsložky
+    GameStateManagerEvents // Importuj typ pro mapu událostí
+} from './types';
+import { PersistedState } from './persistence/types';
 import { produce } from '../utils/immer';
-import { TypedEventEmitter } from '../event/TypedEventEmmitter';
-import { validateState } from './utils'; // Import validation utility z 'state' utilit
+import { TypedEventEmitter } from '../event/TypedEventEmitter';
+import { validateState } from './utils';
+import { GameEngine } from '../engine/GameEngine'; // Importuj GameEngine
 
 /**
  * Spravuje herní stav s důrazem na neměnnost.
- * Zaměřuje se na runtime reprezentaci a modifikaci stavu ve paměti.
- * Zodpovědnost za serializaci, deserializaci a migraci je delegována
- * na služby v modulu `state/persistence`.
- * GameStateManager uchovává aktuální runtime stav a konfiguraci perzistentních klíčů.
  * @template T Typ proměnných ve stavu
  */
 export class GameStateManager<T extends Record<string, unknown> = Record<string, unknown>> {
-    /**
-     * Herní stav (runtime reprezentace ve paměti)
-     */
     private state: GameState<T>;
-
-    /**
-     * Seznam klíčů na nejvyšší úrovni GameState, které by měly být
-     * zahrnuty při vytváření serializovatelné reprezentace stavu (PersistedState).
-     * Tuto konfiguraci spravuje GameStateManager.
-     */
     private persistentKeys: string[];
-
-    /**
-     * Event emitter pro události GameStateManageru (runtime události, např. stateChanged).
-     * Události související s persistencí by měl emitovat SaveManager nebo StateConverter.
-     */
-    private eventEmitter: TypedEventEmitter<GameStateManagerEvents<T>>;
-
-    /**
-     * Callback volaný před serializací stavu.
-     * Tento callback je zde pro zachování možnosti provést přípravu stavu
-     * před jeho předáním persistence vrstvě (např. v SaveManageru).
-     * Měl by být volán z kódu, který provádí serializaci (např. SaveManager).
-     */
+    // Emitter specifický pro události tohoto manažeru
+    private readonly eventEmitter: TypedEventEmitter<GameStateManagerEvents<T>>;
     private onBeforeSerialize?: (state: GameState<T>) => void;
-
-    /**
-     * Callback volaný po deserializaci stavu a jeho úspěšné aplikaci na GameStateManager.
-     * Měl by být volán z kódu, který provádí deserializaci a aplikaci (např. SaveManager po volání applyPersistentState).
-     */
     private onAfterDeserialize?: (state: GameState<T>) => void;
-
 
     /**
      * Vytvoří novou instanci GameStateManager.
-     * Inicializuje stav a konfiguraci perzistentních klíčů.
+     * @param engine Instance GameEngine pro získání typovaného emitteru.
      * @param options Možnosti konfigurace GameStateManageru.
      */
-    constructor(options: GameStateManagerOptions<T> = {}) {
-        // Inicializuje stav pomocí createInitialState, které aplikuje defaulty a počáteční stav z options.
+    constructor(engine: GameEngine, options: GameStateManagerOptions<T> = {}) {
         this.state = this.createInitialState(options.initialState || {});
-        // Inicializuje perzistentní klíče, buď z options nebo výchozí.
-        // Vytvoříme kopii pole pro zajištění, aby externí kód nemohl přímo modifikovat interní pole.
         this.persistentKeys = Array.isArray(options.persistentKeys)
             ? [...options.persistentKeys]
             : [...DEFAULT_PERSISTENT_KEYS];
-        this.eventEmitter = new TypedEventEmitter<GameStateManagerEvents<T>>();
 
-        // Tyto callbacky jsou uloženy, aby je volající (např. SaveManager) mohl získat a volat v příslušný čas.
+        // Získání specifického emitteru z enginu
+        this.eventEmitter = engine.getStateManagerEventEmitter<T>();
+
         this.onBeforeSerialize = options.onBeforeSerialize;
         this.onAfterDeserialize = options.onAfterDeserialize;
-
-
-        // Zajištění, že základní perzistentní klíče (visitedScenes, variables) jsou vždy v seznamu.
         this.ensureDefaultPersistentKeys();
     }
 
-    /**
-     * Zajistí, že výchozí perzistentní klíče (visitedScenes, variables) jsou vždy v seznamu `this.persistentKeys`.
-     * Voláno v konstruktoru a setPersistentKeys.
-     * Modifikuje this.persistentKeys pole (přidává klíče, pokud chybí).
-     * @private
-     */
     private ensureDefaultPersistentKeys(): void {
         if (!this.persistentKeys.includes('visitedScenes')) {
             this.persistentKeys.push('visitedScenes');
@@ -6612,462 +5382,182 @@ export class GameStateManager<T extends Record<string, unknown> = Record<string,
         if (!this.persistentKeys.includes('variables')) {
             this.persistentKeys.push('variables');
         }
-        // Případně lze přidat další klíče, které by měly být *vždy* perzistentní.
     }
 
-
-    /**
-     * Vytvoří výchozí herní stav.
-     * Používá se při inicializaci StateManageru nebo při resetu stavu.
-     * Aplikuje počáteční stav přes základní strukturu a zajišťuje správné typy pro klíčové vlastnosti.
-     * @param initialState Počáteční stav k aplikaci přes defaultní strukturu.
-     * @returns Nově vytvořený GameState objekt.
-     * @private
-     */
     private createInitialState(initialState: Partial<GameState<T>>): GameState<T> {
-        // Základní struktura stavu s výchozími hodnotami pro klíčové vlastnosti
         const baseState: GameState<T> = {
             visitedScenes: new Set<string>(),
             variables: {} as T,
-            // Přidejte zde další výchozí hodnoty pro neperzistentní klíče, pokud existují a jsou součástí základní struktury.
-            // Např: someTransientFlag: false, lastErrorMessage: null
         };
+        const state = { ...baseState, ...initialState } as GameState<T>;
 
-        // Aplikuje initialState přes základní strukturu.
-        // initialState může přepsat výchozí hodnoty, včetně visitedScenes nebo variables.
-        const state = {
-            ...baseState,
-            ...initialState,
-        } as GameState<T>; // Přetypování pro jistotu, pokud initialState přidá dynamické klíče.
-
-        // Explicitně zajistit, že visitedScenes je Set (i když je v baseState, initialState ho může přepsat)
-        // Pokud initialState.visitedScenes bylo pole nebo něco jiného, zkusíme z toho vytvořit Set.
         if (!(state.visitedScenes instanceof Set)) {
-            console.warn("GameStateManager: Initial state for visitedScenes was not a Set. Attempting to convert to Set.");
+            console.warn("GameStateManager: Initial state for visitedScenes was not a Set. Converting to Set.");
             state.visitedScenes = new Set(Array.isArray(state.visitedScenes) ? state.visitedScenes : []);
         }
-
-        // Explicitně zajistit, že variables je objekt (i když je v baseState, initialState ho může přepsat)
         if (typeof state.variables !== 'object' || state.variables === null) {
             console.warn("GameStateManager: Initial state for variables was not an object. Initializing as empty object.");
             state.variables = {} as T;
         }
-
-
         return state;
     }
 
-
-    /**
-     * Vrátí aktuální herní stav.
-     * Vrácený objekt je neměnný z pohledu Immeru.
-     * @returns Aktuální neměnný GameState objekt.
-     */
     public getState(): GameState<T> {
-        return this.state; // Immer zajišťuje, že state je de facto neměnný externě.
+        return this.state;
     }
 
-    /**
-     * Aktualizuje herní stav pomocí Immer.
-     * Funkce `updater` obdrží draft stavu, který lze bezpečně mutovat.
-     * Immer na pozadí vytvoří novou neměnnou verzi stavu, pokud dojde ke změnám.
-     * Emituje událost `stateChanged`, pokud se stav skutečně změní.
-     * @param updater Funkce, která přijme draft stavu a provede v něm změny.
-     * @param source Zdroj změny (volitelné, pro účely ladění/sledování, např. 'effect', 'scene').
-     */
     public updateState(updater: (state: GameState<T>) => void, source?: string): void {
         const previousState = this.state;
-
-        // Immer produce vytvoří nový, neměnný stav, pokud došlo ke změnám v draftu.
-        // Pokud updater nezmění draft, produce vrátí původní referenci (`previousState`).
         this.state = produce(this.state, (draft: GameState<T>) => {
             updater(draft);
         });
-
-        // Emitování události změny stavu pouze pokud se stav skutečně změnil.
-        // Immer produce vrací původní objekt, pokud nebyly provedeny žádné změny.
-        // Porovnání referencí (`this.state !== previousState`) je správný způsob,
-        // jak zjistit, zda se stav "změnil" z pohledu Immer a zda je potřeba emitovat událost.
         if (this.state !== previousState) {
             this.emitStateChanged(previousState, this.state, source || 'update');
         }
     }
 
-    /**
-     * Nastaví kompletně nový herní stav.
-     * Přímé nahrazení aktuálního stavu novým objektem `newState`.
-     * Obchází Immer produce pro tento konkrétní případ.
-     * Může být užitečné pro "rollback", nastavení předem připraveného stavu,
-     * nebo pro aplikaci stavu, který pochází z důvěryhodného externího zdroje
-     * a je již v požadovaném formátu (např. po ruční tvorbě stavu pro testování).
-     * **Důležité:** Předpokládá se, že `newState` je buď důvěryhodný immutable objekt,
-     * nebo s ním nebude dále mutováno externě po předání do `setState`.
-     * @param newState Nový objekt stavu, který se stane aktuálním.
-     * @param source Zdroj změny (volitelné).
-     */
     public setState(newState: GameState<T>, source?: string): void {
-        // Zvažte, zda zde provádět základní validaci vstupního objektu.
-        // validatedState utility může pomoci.
         if (!validateState(newState)) {
-            console.warn("GameStateManager: Attempted to set state with potentially invalid structure.", newState);
-            // Můžete zde rozhodnout, zda vyhodit chybu nebo jen logovat a pokračovat
-            // throw new Error("Attempted to set invalid state.");
+            console.error("GameStateManager: Attempted to set invalid state.", newState);
+            throw new Error("Attempted to set invalid state.");
         }
-
         const previousState = this.state;
-        this.state = newState; // Přímé nahrazení
-
-        // Emitování události změny stavu
+        this.state = newState;
         this.emitStateChanged(previousState, this.state, source || 'setState');
     }
 
-    /**
-     * Aplikuje data z deserializovaného a migrovaného `PersistedState` na aktuální GameStateManager.
-     * Tato metoda by se volala z persistence vrstvy (např. SaveManageru) po úspěšné deserializaci a migraci.
-     * Vytvoří *nový* runtime stav objekt (`GameState`) na základě dat z `PersistedState`
-     * a nahradí jím aktuální stav GameStateManageru.
-     * Zajišťuje správné konverze potřebné pro runtime stav (např. Array -> Set pro visitedScenes).
-     * @param persistedStateData Data načtená z persistence (očekává se, že jsou již migrována na aktuální verzi).
-     * @param source Zdroj změny (obvykle 'deserialize' nebo 'loadGame').
-     */
     public applyPersistentState(persistedStateData: PersistedState<T>, source?: string): void {
         const previousState = this.state;
-
-        // 1. Vytvoření zcela nového GameState objektu z dat z `persistedStateData`.
-        // Tím se zajistí, že nepřeneseme neperzistentní data z předchozího `this.state`.
-        // Nový objekt se inicializuje s hodnotami pro klíčové persistentní vlastnosti
-        // na základě dat z `persistedStateData`.
-
         const newState: GameState<T> = {
-            // visitedScenes: Převede pole stringů (z persistence) zpět na Set<string>.
-            // Pokud persistedStateData.visitedScenes neexistuje nebo není pole, použije prázdné pole,
-            // což vytvoří prázdný Set.
             visitedScenes: new Set(Array.isArray(persistedStateData.visitedScenes) ? persistedStateData.visitedScenes : []),
-            // variables: Použije objekt variables z persistedStateData.
-            // Pokud persistedStateData.variables neexistuje nebo není objekt, použije prázdný objekt.
-            // Přetypuje na T.
             variables: (typeof persistedStateData.variables === 'object' && persistedStateData.variables !== null ? persistedStateData.variables : {}) as T,
-            // Ostatní perzistentní klíče budou přidány v následujícím kroku
-            // Neperzistentní klíče, které NEBYLY v persistedStateData, zde NEBUDOU.
-            // Pokud by bylo potřeba zachovat hodnoty NEpersistentních klíčů z předchozího stavu
-            // při načítání, musela by se zde provést složitější logika sloučení:
-            // { ...filterNonPersistentKeys(previousState), ...newStateFromPersistence }
-            // Aktuální návrh (nový objekt z persistence dat) je bezpečnější pro čisté načtení stavu.
-        } as GameState<T>; // Přetypování na GameState<T>
+        } as GameState<T>;
 
-        // 2. Kopírování dalších perzistentních vlastností z `persistedStateData` do `newState`.
-        // Iterujeme přes klíče definované v `this.persistentKeys` GameStateManageru.
-        // Tím se zajistí, že do nového runtime stavu se dostanou pouze klíče, které *tento GameStateManager*
-        // definuje jako perzistentní, i když `persistedStateData` mohla obsahovat něco navíc
-        // (např. stará metadata nebo transientní data z minula z jiného kontextu).
-        // Zajišťuje také, že se nekopírují metadata (`_metadata`).
         for (const key of this.persistentKeys) {
-            // visitedScenes a variables už jsme zpracovali, přeskočíme je.
-            if (key === 'visitedScenes' || key === 'variables') {
-                continue;
-            }
-
-            // Pokud klíč existuje v načtených perzistentních datech (`persistedStateData`)
-            // a není to systémový klíč (_metadata), zkopírujeme jeho hodnotu do nového runtime stavu (`newState`).
+            if (key === 'visitedScenes' || key === 'variables') continue;
             if (key in persistedStateData && key !== '_metadata') {
-                // Přístup přes 'any' je nutný kvůli dynamickým klíčům
                 (newState as any)[key] = (persistedStateData as any)[key];
-            } else {
-                // Volitelné: Pokud perzistentní klíč definovaný v GameStateManageru chybí v načtených datech,
-                // můžete zde nastavit výchozí hodnotu nebo logovat varování.
-                // console.warn(`GameStateManager: Persistent key '${key}' not found in loaded data. Skipping.`);
             }
         }
 
-        // 3. Metadata (`_metadata`) by neměla být v persistentKeys a neměla by se dostat do runtime GameState<T>.
-        // Při správném toku StateConverteru by se neměla objevit v datech kopírovaných smyčkou výše.
-
-        // 4. Nastavení nově vytvořeného stavu jako aktuálního stavu GameStateManageru.
         this.state = newState;
 
-        // 5. Volání callbacku po deserializaci (pokud je nastaven a byl předán v konstruktoru GameStateManageru).
-        // Tento callback má signature pro GameState, takže je zde volán s novým GameState.
         if (this.onAfterDeserialize) {
-            this.onAfterDeserialize(this.state);
+            try {
+                this.onAfterDeserialize(this.state);
+            } catch (error) {
+                console.error("Error in onAfterDeserialize callback:", error)
+            }
         }
 
-        // 6. Emitování události změny stavu.
-        // Předchozí stav je ten, který existoval před aplikací perzistentních dat.
-        // Zdroj je obvykle 'deserialize' nebo 'loadGame', jak ho předá volající (např. SaveManager).
         this.emitStateChanged(previousState, this.state, source || 'applyPersistentState');
     }
 
-
-    /**
-     * Resetuje stav GameStateManageru na výchozí hodnoty.
-     * Vytvoří nový výchozí stav pomocí `createInitialState` a nahradí jím aktuální stav.
-     * @param options Částečný stav k nastavení přes výchozí hodnoty po resetu.
-     */
     public resetState(options: Partial<GameState<T>> = {}): void {
         const previousState = this.state;
-        this.state = this.createInitialState(options); // Vytvoření nového výchozího stavu
-
-        // Emitování události změny stavu
+        this.state = this.createInitialState(options);
         this.emitStateChanged(previousState, this.state, 'reset');
     }
 
-    /**
-     * Sloučí externí částečný stav s aktuálním runtime stavem.
-     * Používá `updateState` s Immerem pro vytvoření nového, neměnného stavu.
-     * Toto je primárně určeno pro slučování runtime změn (např. z pluginu),
-     * nikoliv pro načítání kompletního stavu z persistence (k tomu slouží `applyPersistentState`).
-     * @param externalState Částečný stav k sloučení.
-     */
     public mergeState(externalState: Partial<GameState<T>>): void {
-        // Zvažte, zda zde provést základní validaci externalState
         this.updateState(state => {
-            // Sloučení visitedScenes (přidání nových do existujícího Setu)
             if (externalState.visitedScenes) {
-                // Zajištění, že externalState.visitedScenes je iterovatelné a konverze na Set, pokud je potřeba
                 const scenesToAdd = externalState.visitedScenes instanceof Set
                     ? externalState.visitedScenes
                     : Array.isArray(externalState.visitedScenes)
                         ? new Set(externalState.visitedScenes)
-                        : []; // Pokud to není ani Set ani Array, nic nepřidáme
-
+                        : [];
                 for (const sceneKey of scenesToAdd) {
                     state.visitedScenes.add(sceneKey);
                 }
             }
-
-            // Sloučení variables (přepsání existujících a přidání nových)
             if (externalState.variables && typeof externalState.variables === 'object') {
-                // Použití Object.assign provede shallow merge.
-                // Pokud variables obsahují zanořené objekty, které potřebujete hluboce sloučit,
-                // budete potřebovat rekurzivní merge utility (např. z lodash, ale opatrně s Immerem drafty).
                 Object.assign(state.variables, externalState.variables);
-                // Alternativně, pokud máte bezpečnou deep merge utilitu pro Immer drafty:
-                // mergeDeep(state.variables, externalState.variables);
             }
-
-            // Sloučení ostatních vlastností na první úrovni (ty, které nejsou visitedScenes nebo variables)
-            // Iterujeme přes externalState, abychom věděli, co přidat/přepsat v draftu.
-            // Kontrola `Object.prototype.hasOwnProperty.call` zajišťuje, že kopírujeme jen vlastní vlastnosti, ne z prototypu.
             for (const key in externalState) {
                 if (Object.prototype.hasOwnProperty.call(externalState, key) && key !== 'visitedScenes' && key !== 'variables') {
-                    // Přístup k vlastnosti na draftu přes 'any' je nutný kvůli dynamickým klíčům GameState.
                     (state as any)[key] = (externalState as any)[key];
                 }
             }
         }, 'mergeState');
     }
 
-
-    /**
-     * Získá hodnotu proměnné ze stavu `state.variables`.
-     * @template K Typ klíče proměnné.
-     * @param name Název proměnné.
-     * @param defaultValue Výchozí hodnota, která se vrátí, pokud proměnná neexistuje nebo je `undefined` nebo `null`.
-     * @returns Hodnota proměnné nebo `defaultValue`, pokud je poskytnuto a hodnota je `undefined` nebo `null`.
-     */
     public getVariable<K extends keyof T>(name: K, defaultValue?: T[K]): T[K] | undefined {
-        // Použití nullish coalescing (??) pro správné vrácení defaultValue pro null/undefined.
-        // Pokud hodnota existuje, ale je 0, false nebo '', vrátí se tato hodnota, nikoli defaultValue.
         return this.state.variables[name] ?? defaultValue;
     }
 
-    /**
-     * Nastaví hodnotu proměnné ve stavu `state.variables`.
-     * Používá `updateState` pro zajištění neměnnosti.
-     * @template K Typ klíče proměnné.
-     * @param name Název proměnné.
-     * @param value Hodnota k nastavení.
-     */
     public setVariable<K extends keyof T>(name: K, value: T[K]): void {
-        this.updateState(state => {
-            // Immer draft umožňuje přímou modifikaci v `state.variables`.
-            state.variables[name] = value;
-        }, 'setVariable');
+        this.updateState(state => { state.variables[name] = value; }, 'setVariable');
     }
 
-    /**
-     * Zkontroluje, zda proměnná existuje (není `undefined`) ve stavu `state.variables`.
-     * @template K Typ klíče proměnné.
-     * @param name Název proměnné.
-     * @returns True, pokud proměnná s daným názvem existuje v `state.variables` a její hodnota není `undefined`.
-     */
     public hasVariable<K extends keyof T>(name: K): boolean {
-        // Kontroluje, zda je klíč přítomen A hodnota není undefined.
-        // Pokud byste chtěli kontrolovat pouze přítomnost klíče (včetně `undefined`/`null` hodnot), použijte `name as string in this.state.variables`.
         return this.state.variables[name] !== undefined;
     }
 
-    /**
-     * Odebere proměnnou ze stavu `state.variables`.
-     * Používá `updateState` pro zajištění neměnnosti.
-     * @template K Typ klíče proměnné.
-     * @param name Název proměnné k odebrání.
-     */
     public removeVariable<K extends keyof T>(name: K): void {
-        this.updateState(state => {
-            // Použijte `delete` pro odstranění klíče ze `state.variables` draftu.
-            delete state.variables[name];
-        }, 'removeVariable');
+        this.updateState(state => { delete state.variables[name]; }, 'removeVariable');
     }
 
-
-    /**
-     * Označí scénu jako navštívenou.
-     * Přidá klíč scény do Setu `state.visitedScenes`.
-     * Používá `updateState`.
-     * @param sceneKey Klíč scény.
-     */
     public markSceneVisited(sceneKey: string): void {
-        this.updateState(state => {
-            // Add metoda Setu je idempotentní (přidání stejného klíče vícekrát nemá efekt).
-            state.visitedScenes.add(sceneKey);
-        }, 'markSceneVisited');
+        this.updateState(state => { state.visitedScenes.add(sceneKey); }, 'markSceneVisited');
     }
 
-    /**
-     * Zruší označení scény jako navštívené.
-     * Odebere klíč scény ze Setu `state.visitedScenes`.
-     * Používá `updateState`.
-     * @param sceneKey Klíč scény.
-     */
     public unmarkSceneVisited(sceneKey: string): void {
-        this.updateState(state => {
-            // Delete metoda Setu nic nedělá, pokud prvek neexistuje.
-            state.visitedScenes.delete(sceneKey);
-        }, 'unmarkSceneVisited');
+        this.updateState(state => { state.visitedScenes.delete(sceneKey); }, 'unmarkSceneVisited');
     }
 
-    /**
-     * Vyčistí seznam navštívených scén.
-     * Nastaví `state.visitedScenes` na prázdný Set.
-     * Používá `updateState`.
-     */
     public clearVisitedScenes(): void {
-        this.updateState(state => {
-            state.visitedScenes.clear(); // Clear metoda Setu.
-        }, 'clearVisitedScenes');
+        this.updateState(state => { state.visitedScenes.clear(); }, 'clearVisitedScenes');
     }
 
-    /**
-     * Zkontroluje, zda scéna byla navštívena.
-     * @param sceneKey Klíč scény.
-     * @returns True, pokud klíč scény existuje v Setu `state.visitedScenes`.
-     */
     public hasVisitedScene(sceneKey: string): boolean {
         return this.state.visitedScenes.has(sceneKey);
     }
 
-    /**
-     * Vrátí počet navštívených scén.
-     * @returns Počet prvků v Setu `state.visitedScenes`.
-     */
     public getVisitedScenesCount(): number {
         return this.state.visitedScenes.size;
     }
 
-
-    /**
-     * Nastaví seznam klíčů na nejvyšší úrovni stavu, které budou persistovány při serializaci.
-     * Tato konfigurace je uložena v GameStateManageru a měla by být předána persistence vrstvě
-     * při volání serializačních metod.
-     * Zajistí, že základní klíče (`visitedScenes`, `variables`) jsou vždy zahrnuty.
-     * Emituje událost `persistentKeysChanged`.
-     * @param keys Seznam klíčů k nastavení. Měla by to být pole stringů.
-     */
     public setPersistentKeys(keys: string[]): void {
-        // Vytvoří novou kopii pole pro zajištění neměnnosti pole perzistentních klíčů (externě).
-        // Zároveň zajistí, že vstup je pole.
         this.persistentKeys = Array.isArray(keys) ? [...keys] : [];
-        // Zajistí, že základní klíče jsou v novém seznamu.
         this.ensureDefaultPersistentKeys();
-
-        // Emitování události o změně perzistentních klíčů s kopií aktuálního seznamu.
         this.eventEmitter.emit('persistentKeysChanged', { keys: [...this.persistentKeys] });
     }
 
-    /**
-     * Vrátí seznam klíčů na nejvyšší úrovni stavu, které budou persistovány při serializaci.
-     * Tato konfigurace je uložena v GameStateManageru.
-     * @returns Kopie pole perzistentních klíčů.
-     */
     public getPersistentKeys(): string[] {
-        // Vrací kopii pole, aby se externí kód nemohl měnit interní pole přímo.
         return [...this.persistentKeys];
     }
 
-    /**
-     * Přidá klíč do seznamu perzistentních klíčů, pokud tam ještě není.
-     * Vytvoří nové pole perzistentních klíčů a nahradí stávající.
-     * Emituje událost `persistentKeysChanged`, pokud klíč byl přidán.
-     * @param key Klíč k přidání.
-     */
     public addPersistentKey(key: string): void {
-        if (typeof key !== 'string' || key.length === 0) {
-            console.warn("GameStateManager: Cannot add invalid persistent key.", key);
-            return;
-        }
+        if (typeof key !== 'string' || key.length === 0) return;
         if (!this.persistentKeys.includes(key)) {
-            // Vytvoření nového pole s přidaným klíčem.
             this.persistentKeys = [...this.persistentKeys, key];
-
-            // Emitování události o změně perzistentních klíčů.
             this.eventEmitter.emit('persistentKeysChanged', { keys: [...this.persistentKeys] });
         }
     }
 
-    /**
-     * Odebere klíč ze seznamu perzistentních klíčů, pokud tam je.
-     * Základní klíče (`visitedScenes`, `variables`) nelze odebrat pomocí této metody.
-     * Vytvoří nové pole perzistentních klíčů a nahradí stávající.
-     * Emituje událost `persistentKeysChanged`, pokud klíč byl odebrán.
-     * @param key Klíč k odebrání.
-     */
     public removePersistentKey(key: string): void {
-        if (typeof key !== 'string' || key.length === 0) {
-            console.warn("GameStateManager: Cannot remove invalid persistent key.", key);
-            return;
-        }
-        // Kontrola, zda se nejedná o základní perzistentní klíč, který by měl být vždy uložen.
+        if (typeof key !== 'string' || key.length === 0) return;
         if (key === 'visitedScenes' || key === 'variables') {
-            console.warn(`GameStateManager: Cannot remove default persistent key "${key}". These keys are required for basic state persistence.`);
+            console.warn(`GameStateManager: Cannot remove default persistent key "${key}".`);
             return;
         }
-
         const index = this.persistentKeys.indexOf(key);
         if (index !== -1) {
-            // Vytvoření nového pole bez odebraného klíče.
             this.persistentKeys = [
                 ...this.persistentKeys.slice(0, index),
                 ...this.persistentKeys.slice(index + 1)
             ];
-
-            // Emitování události o změně perzistentních klíčů.
             this.eventEmitter.emit('persistentKeysChanged', { keys: [...this.persistentKeys] });
         }
     }
 
-    /**
-     * Emituje událost `stateChanged` s informacemi o předchozím a novém stavu a zdroji změny.
-     * Voláno interně po každé změně stavu provedené pomocí `updateState`, `setState`, `applyPersistentState` nebo `resetState`.
-     * @param previousState Předchozí stav (reference na objekt před změnou). Null při aplikaci prvního stavu (např. v konstruktoru).
-     * @param newState Nový aktuální stav (reference na nový objekt po změně).
-     * @param source Zdroj změny.
-     * @private
-     */
     private emitStateChanged(previousState: GameState<T> | null, newState: GameState<T>, source?: string): void {
-        this.eventEmitter.emit('stateChanged', {
-            previousState, // Odkaz na předchozí stav (neměnný díky Immeru)
-            newState,      // Odkaz na nový stav (neměnný díky Immeru nebo přímé nahrazení)
-            source         // Zdroj změny
-        });
+        const eventData: StateChangedEvent<T> = { previousState, newState, source };
+        this.eventEmitter.emit('stateChanged', eventData);
     }
 
-    /**
-     * Registruje posluchače pro události GameStateManageru.
-     * @template K Typ klíče události definované v `GameStateManagerEvents`.
-     * @param event Typ události (např. 'stateChanged', 'persistentKeysChanged').
-     * @param listener Funkce volaná při emitování události. Přijímá datový typ `T[K]`.
-     */
+    // Veřejné on/off metody pro naslouchání na události GameStateManageru
     public on<K extends keyof GameStateManagerEvents<T>>(
         event: K,
         listener: (data: GameStateManagerEvents<T>[K]) => void
@@ -7075,12 +5565,6 @@ export class GameStateManager<T extends Record<string, unknown> = Record<string,
         this.eventEmitter.on(event, listener);
     }
 
-    /**
-     * Odregistruje posluchače pro události GameStateManageru.
-     * @template K Typ klíče události definované v `GameStateManagerEvents`.
-     * @param event Typ události.
-     * @param listener Funkce, která byla registrována.
-     */
     public off<K extends keyof GameStateManagerEvents<T>>(
         event: K,
         listener: (data: GameStateManagerEvents<T>[K]) => void
@@ -7088,21 +5572,10 @@ export class GameStateManager<T extends Record<string, unknown> = Record<string,
         this.eventEmitter.off(event, listener);
     }
 
-    /**
-     * Vrátí referenci na callback, který byl registrován v konstruktoru pro volání před serializací.
-     * Tento callback by měl být volán z kódu, který provádí serializaci stavu (např. SaveManager nebo StateConverter).
-     * @returns Callback `onBeforeSerialize` nebo undefined.
-     */
     public getOnBeforeSerializeCallback(): ((state: GameState<T>) => void) | undefined {
         return this.onBeforeSerialize;
     }
 
-    /**
-     * Vrátí referenci na callback, který byl registrován v konstruktoru pro volání po deserializaci a aplikaci stavu.
-     * Tento callback by měl být volán z kódu, který provede aplikaci deserializovaného stavu
-     * (např. SaveManager po volání `applyPersistentState`).
-     * @returns Callback `onAfterDeserialize` nebo undefined.
-     */
     public getOnAfterDeserializeCallback(): ((state: GameState<T>) => void) | undefined {
         return this.onAfterDeserialize;
     }
@@ -7754,7 +6227,7 @@ export function isValidUUID(id: string): boolean {
 <file path="src/index.ts">
 export * from './event';
 
-export { GameEngine, createGameEngine, createSimpleGameEngine, createDebugGameEngine, preloadAllScenes } from './engine';
+export { GameEngine, createGameEngine } from './engine';
 export { GameEngineOptions, GameEngineEvents } from './engine/types';
 
 export * from './scene';

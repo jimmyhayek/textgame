@@ -99,7 +99,15 @@ export class GenericContentLoader<T extends object, K extends string = string> {
                     : content;
 
                 this.loadedContent.set(key, enhancedContent);
+                // Odstraníme promise z loadingPromises po úspěšném načtení
+                this.loadingPromises.delete(key);
                 return enhancedContent;
+            }).catch(error => {
+                // Odstraníme promise z loadingPromises i v případě chyby
+                this.loadingPromises.delete(key);
+                console.error(`Failed to load content for key "${key}":`, error);
+                // Znovu vyhodíme chybu, aby ji mohl zachytit volající (např. preloadContent)
+                throw error;
             });
         } else {
             // Zpracování přímého obsahu
@@ -111,7 +119,11 @@ export class GenericContentLoader<T extends object, K extends string = string> {
             this.loadedContent.set(key, content);
         }
 
-        this.loadingPromises.set(key, loadPromise);
+        // Uložíme promise POUZE pokud se jedná o skutečné načítání (lazy-load)
+        if (typeof contentDefOrImport === 'function') {
+            this.loadingPromises.set(key, loadPromise);
+        }
+
         return loadPromise;
     }
 
@@ -133,13 +145,53 @@ export class GenericContentLoader<T extends object, K extends string = string> {
     }
 
     /**
-     * Předem načte obsah podle klíčů
-     * @param keys Volitelné pole klíčů obsahu k načtení, načte veškerý obsah pokud není uvedeno
-     * @returns Promise, který se vyřeší, když je veškerý obsah načten
+     * Předem načte obsah podle klíčů.
+     * Pokud klíč odkazuje na již načtený obsah, nic se neděje.
+     * Pokud klíč odkazuje na lazy-loaded obsah, spustí jeho načítání.
+     *
+     * @param keys Volitelné pole klíčů obsahu k načtení. Pokud není uvedeno,
+     *             pokusí se načíst veškerý *lazy-loaded* obsah registrovaný v loaderu.
+     * @returns Promise, který se vyřeší, když jsou všechny požadované položky načteny (nebo jejich načítání selhalo).
+     *          Promise bude *rejected*, pokud načtení *alespoň jedné* položky selže.
+     * @throws Error pokud načtení některé z položek selže.
      */
     public async preloadContent(keys?: string[]): Promise<void> {
-        const keysToLoad: string[] = keys || this.getContentKeys();
-        await Promise.all(keysToLoad.map(key => this.loadContent(key)));
+        let keysToLoad: string[];
+
+        if (keys) {
+            // Pokud jsou klíče specifikovány, filtrujeme jen ty, které jsou v registry
+            keysToLoad = keys.filter(key => this.hasContent(key));
+        } else {
+            // Pokud nejsou klíče specifikovány, vezmeme všechny klíče z registry,
+            // které odpovídají lazy-loading funkcím a ještě nebyly načteny.
+            keysToLoad = this.getContentKeys().filter(key =>
+                typeof this.registry[key] === 'function' &&
+                !this.loadedContent.has(key) &&
+                !this.loadingPromises.has(key) // Nepokoušíme se znovu načítat, co se už načítá
+            );
+        }
+
+        if (keysToLoad.length === 0) {
+            // Není co načítat
+            return Promise.resolve();
+        }
+
+        console.log(`Preloading content for keys: ${keysToLoad.join(', ')}`);
+
+        // Vytvoříme pole promises voláním loadContent pro každý klíč.
+        // loadContent() inteligentně použije cache nebo existující loading promises.
+        const preloadPromises = keysToLoad.map(key => this.loadContent(key));
+
+        // Použijeme Promise.all ke spuštění všech načítání paralelně.
+        // Promise.all se rejectne, pokud jakýkoli z vnitřních promises selže.
+        try {
+            await Promise.all(preloadPromises);
+            console.log(`Successfully preloaded content for keys: ${keysToLoad.join(', ')}`);
+        } catch (error) {
+            // Chyba byla již zalogována v loadContent, zde ji jen přepošleme dál
+            console.error(`Error occurred during preloading content.`);
+            throw error; // Umožní volajícímu zjistit, že preload selhal
+        }
     }
 
     /**
@@ -151,11 +203,13 @@ export class GenericContentLoader<T extends object, K extends string = string> {
     }
 
     /**
-     * Vyčistí cache a načte veškerý obsah znovu při příštím požadavku
+     * Vyčistí cache načteného obsahu a běžících načítání.
+     * Obsah bude znovu načten při příštím požadavku (loadContent nebo preloadContent).
      */
     public clearCache(): void {
         this.loadedContent.clear();
         this.loadingPromises.clear();
+        console.log('Content loader cache cleared.');
     }
 
     /**
@@ -165,6 +219,7 @@ export class GenericContentLoader<T extends object, K extends string = string> {
      * @private
      */
     private isModuleWithDefault(obj: any): obj is { default: T } {
-        return obj && typeof obj === 'object' && 'default' in obj;
+        // Přidána kontrola, zda obj není null, a zda 'default' existuje
+        return obj && typeof obj === 'object' && true && 'default' in obj;
     }
 }

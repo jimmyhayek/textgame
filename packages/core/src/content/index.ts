@@ -9,6 +9,7 @@ export { LoaderRegistry } from './LoaderRegistry';
 export {
     createContentLoader,
     defineContent,
+    defineScenes,
     mergeContentRegistries,
     generateContentKey,
     extractContentKeys,

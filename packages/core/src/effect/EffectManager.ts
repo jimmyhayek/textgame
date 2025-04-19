@@ -1,4 +1,4 @@
-import { GameState } from '../state/types';
+import { GameState } from '../state';
 import { Effect, EffectProcessor, EffectType, BuiltInEffectType } from './types';
 import { produce } from '../utils/immer';
 import { createDefaultEffectProcessors } from './processors';

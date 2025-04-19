@@ -18,17 +18,18 @@ export function createContentLoader<T extends object, K extends string = string>
 
 /**
  * Vytvoří definici obsahu pro registraci s engine
- * @template T Typ obsahu
+ * @template T Typ obsahu (hodnoty v registru)
  * @param type Identifikátor typu obsahu
- * @param content Registry obsahu
+ * @param contentRegistry Registry obsahu
  * @returns Definice obsahu připravená k registraci
  */
-export function defineContent<T extends ContentRegistry<any, any>>(
+export function defineContent<T extends object>( // Omezení T extends object
     type: string,
-    content: T
-): ContentDefinition<T> {
-    return { type, content };
+    contentRegistry: ContentRegistry<T> // Přijímá přímo ContentRegistry<T>
+): ContentDefinition<T> { // Vrací správný typ
+    return { type, content: contentRegistry };
 }
+
 
 /**
  * Spojí více registrů obsahu do jednoho
@@ -90,10 +91,9 @@ export function mapContentRegistry<T extends object, U extends object, K extends
             // Pro lazy-loaded obsah
             result[key] = async () => {
                 const loadedContent = await (value as Function)();
-                if ('default' in loadedContent) {
-                    return { default: mapFn(loadedContent.default, key) };
-                }
-                return mapFn(loadedContent as T, key);
+                // Handle default export from ES modules
+                const actualContent = ('default' in loadedContent) ? loadedContent.default : loadedContent;
+                return mapFn(actualContent as T, key);
             };
         } else {
             // Pro okamžitý obsah

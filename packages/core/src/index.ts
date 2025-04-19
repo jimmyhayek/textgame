@@ -1,6 +1,6 @@
 export * from './event';
 
-export { GameEngine, createGameEngine, createSimpleGameEngine, createDebugGameEngine, preloadAllScenes } from './engine';
+export { GameEngine, createGameEngine } from './engine';
 export { GameEngineOptions, GameEngineEvents } from './engine/types';
 
 export * from './scene';

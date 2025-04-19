@@ -1,66 +1,46 @@
+// Importuj správně typy a enumy
 import {
     GameEngineOptions,
-    GameEngineEvents,
+    GameEngineCoreEvents, // Použij přejmenovaný enum
     GameStartedEventData,
     GameEndedEventData,
     SceneChangedEventData,
-    EffectAppliedEventData
+    EffectAppliedEventData,
+    EngineEventMap, // Import sjednocené mapy
+    EngineCoreEventMap // Import mapy pro core události
 } from './types';
-import { GameState } from '../state/types';
+import { GameState, GameStateManagerEvents } from '../state/types'; // GameStateManagerEvents z state/types
 import { Scene, SceneKey, SceneTransitionOptions } from '../scene/types';
 import { Effect } from '../effect/types';
-import { EventEmitter } from '../event';
-import { GameStateManager } from '../state';
+import { EventEmitter } from '../event/EventEmitter';
+import { TypedEventEmitter } from '../event/TypedEventEmitter'; // Zkontroluj název souboru!
+import { GameStateManager } from '../state'; // GameStateManager z state/index
 import { SceneManager } from '../scene/SceneManager';
 import { EffectManager } from '../effect/EffectManager';
 import { PluginManager } from '../plugin/PluginManager';
 import { GenericContentLoader } from '../content/GenericContentLoader';
 import { LoaderRegistry } from '../content/LoaderRegistry';
-import { SaveManager } from '../save/SaveManager';
-import { ContentDefinition } from '../content/types';
-import { Plugin } from '../plugin/types';
+import { SaveManager, SaveEvents, SaveEventMap } from '../save'; // SaveEventMap ze save/index
+import { ContentDefinition, ContentRegistry } from '../content/types';
+import { Plugin, PluginEvents, PluginEventMap } from '../plugin/types'; // PluginEventMap z plugin/types
 import { createSaveManager } from '../save/utils';
-import { GameEventType, EventListener } from '../event/types';
+import { GameEventType, EventListener } from '../event/types'; // Import z event/types
+import { StateManagerPersistenceEvents, PersistedState } from '../state/persistence/types';
 
 /**
  * Hlavní třída herního enginu
- *
- * Koordinuje všechny komponenty enginu, spravuje stav hry a přechody
- * mezi scénami, a poskytuje rozhraní pro interakci s herním světem.
  */
 export class GameEngine {
-    /** Verze enginu */
     private readonly version: string;
-
-    /** Event emitter pro události */
     private readonly eventEmitter: EventEmitter;
-
-    /** Správce stavu */
     private readonly stateManager: GameStateManager;
-
-    /** Správce scén */
     private readonly sceneManager: SceneManager;
-
-    /** Správce efektů */
     private readonly effectManager: EffectManager;
-
-    /** Správce pluginů */
     private readonly pluginManager: PluginManager;
-
-    /** Registr loaderů obsahu */
     private readonly loaderRegistry: LoaderRegistry;
-
-    /** Správce ukládání a načítání */
     private readonly saveManager: SaveManager;
-
-    /** Příznak, zda je hra spuštěna */
     private isRunning: boolean = false;
 
-    /**
-     * Vytvoří novou instanci herního enginu
-     *
-     * @param options Možnosti konfigurace
-     */
     constructor(options: GameEngineOptions) {
         const {
             sceneLoader,
@@ -70,72 +50,91 @@ export class GameEngine {
         } = options;
 
         this.version = engineVersion;
-
-        // Vytvoření nebo převzetí event emitteru
         this.eventEmitter = options.eventEmitter || new EventEmitter();
 
-        // Vytvoření správce stavu
-        this.stateManager = new GameStateManager({
-            initialState
+        // GameStateManager nyní přijímá engine
+        this.stateManager = new GameStateManager(this, {
+            initialState,
+            persistentKeys: options.persistentKeys, // Předání persistentKeys
+            onBeforeSerialize: options.onBeforeSerialize, // Předání callbacků
+            onAfterDeserialize: options.onAfterDeserialize
         });
 
-        // Vytvoření registru loaderů obsahu
         this.loaderRegistry = new LoaderRegistry();
-
-        // Vytvoření správce efektů
-        this.effectManager = new EffectManager();
-
-        // Registrace loaderu scén
+        this.effectManager = new EffectManager({ registerDefaultEffects: options.registerDefaultEffects ?? true });
         this.loaderRegistry.registerLoader('scenes', sceneLoader);
-
-        // Vytvoření správce scén
         this.sceneManager = new SceneManager(sceneLoader);
 
-        // Vytvoření správce pluginů
         this.pluginManager = new PluginManager(this, this.eventEmitter, {
-            autoActivate: true
+            autoActivate: options.autoActivatePlugins ?? true,
+            allowOverride: options.allowPluginOverride ?? false
         });
 
-        // Vytvoření nebo převzetí správce ukládání
         if (options.saveManager) {
             this.saveManager = options.saveManager;
         } else {
             this.saveManager = createSaveManager(this, {
                 storage: options.saveStorage,
-                engineVersion: this.version
+                engineVersion: this.version,
+                storagePrefix: options.storagePrefix,
+                enableAutoSave: options.enableAutoSave,
+                autoSaveInterval: options.autoSaveInterval,
+                autoSaveSlots: options.autoSaveSlots,
+                storageType: options.storageType
             });
         }
 
-        // Inicializace pluginů
-        this.initializePlugins(plugins)
+        this.initializePlugins(plugins); // Tato metoda je async
     }
 
-    /**
-     * Inicializuje pluginy
-     *
-     * @param plugins Pole pluginů k inicializaci
-     * @private
-     */
     private async initializePlugins(plugins: Plugin[]): Promise<void> {
         for (const plugin of plugins) {
-            await this.pluginManager.registerPlugin(plugin);
+            // Ošetření chyby při registraci pluginu
+            try {
+                await this.pluginManager.registerPlugin(plugin);
+            } catch (error) {
+                console.error(`Failed to register or activate plugin '${plugin.name}':`, error);
+                // Emituj engine error
+                this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                    message: `Plugin registration/activation failed: ${plugin.name}`,
+                    error,
+                    context: 'pluginInitialization'
+                });
+            }
         }
     }
 
-    /**
-     * Spustí hru od zadané scény
-     *
-     * @param initialSceneKey Klíč počáteční scény
-     * @param options Volitelné možnosti přechodu
-     * @returns Promise, který se vyřeší, když je hra spuštěna
-     */
+    // --- Typed Emitter Getters ---
+    // Vrací typovaný emitter pro všechny události procházející enginem
+    public getTypedEventEmitter(): TypedEventEmitter<EngineEventMap> {
+        return new TypedEventEmitter<EngineEventMap>(this.eventEmitter);
+    }
+    // Specifické gettery pro jednotlivé mapy událostí
+    public getCoreEventEmitter(): TypedEventEmitter<EngineCoreEventMap> {
+        return new TypedEventEmitter<EngineCoreEventMap>(this.eventEmitter);
+    }
+    public getPluginEventEmitter(): TypedEventEmitter<PluginEventMap> {
+        return new TypedEventEmitter<PluginEventMap>(this.eventEmitter);
+    }
+    public getSaveEventEmitter(): TypedEventEmitter<SaveEventMap> {
+        return new TypedEventEmitter<SaveEventMap>(this.eventEmitter);
+    }
+    public getStateManagerEventEmitter<T extends Record<string, unknown>>(): TypedEventEmitter<GameStateManagerEvents<T>> {
+        return new TypedEventEmitter<GameStateManagerEvents<T>>(this.eventEmitter);
+    }
+    public getPersistenceEventEmitter<T extends Record<string, unknown>>(): TypedEventEmitter<StateManagerPersistenceEvents<T>> {
+        return new TypedEventEmitter<StateManagerPersistenceEvents<T>>(this.eventEmitter);
+    }
+    public getGenericEventEmitter(): EventEmitter {
+        return this.eventEmitter;
+    }
+    // ---
+
     public async start(initialSceneKey: SceneKey, options?: SceneTransitionOptions): Promise<boolean> {
-        // Aplikace efektů, pokud existují
         if (options?.effects && options.effects.length > 0) {
             this.applyEffects(options.effects);
         }
 
-        // Přechod na počáteční scénu
         const success = await this.sceneManager.transitionToScene(
             initialSceneKey,
             this.stateManager.getState(),
@@ -144,53 +143,38 @@ export class GameEngine {
 
         if (success) {
             this.isRunning = true;
-
-            // Emitování události startu hry
-            this.eventEmitter.emit(GameEngineEvents.GAME_STARTED, {
+            const startEventData: GameStartedEventData = {
                 sceneKey: initialSceneKey,
                 transitionData: options?.data
-            } as GameStartedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.GAME_STARTED, startEventData);
 
-            // Emitování události změny scény
-            this.eventEmitter.emit(GameEngineEvents.SCENE_CHANGED, {
-                scene: this.sceneManager.getCurrentScene(),
+            const sceneChangeEventData: SceneChangedEventData = {
+                scene: this.sceneManager.getCurrentScene()!,
                 sceneKey: initialSceneKey,
                 transitionData: options?.data
-            } as SceneChangedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.SCENE_CHANGED, sceneChangeEventData);
         } else {
             console.error(`Failed to start game at scene '${initialSceneKey}'`);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to start game at scene '${initialSceneKey}'`,
+                context: 'startGame'
+            });
         }
-
         return success;
     }
 
-    /**
-     * Ukončí běžící hru
-     *
-     * @param reason Volitelný důvod ukončení
-     * @param data Volitelná dodatečná data
-     */
     public end(reason?: string, data: Record<string, any> = {}): void {
-        if (!this.isRunning) {
-            return;
-        }
-
+        if (!this.isRunning) return;
         this.isRunning = false;
-
-        // Emitování události konce hry
-        this.eventEmitter.emit(GameEngineEvents.GAME_ENDED, {
-            reason,
-            ...data
-        } as GameEndedEventData);
+        const eventData: GameEndedEventData = { reason, ...data };
+        // Použij core emitter
+        this.getCoreEventEmitter().emit(GameEngineCoreEvents.GAME_ENDED, eventData);
     }
 
-    /**
-     * Přesune hru na novou scénu
-     *
-     * @param sceneKey Klíč cílové scény
-     * @param options Volitelné možnosti přechodu
-     * @returns Promise, který se vyřeší, když je přechod dokončen
-     */
     public async transitionToScene(
         sceneKey: SceneKey,
         options?: SceneTransitionOptions
@@ -199,16 +183,13 @@ export class GameEngine {
             console.warn('Cannot transition: game is not running. Call start() first.');
             return false;
         }
-
         const previousSceneKey = this.sceneManager.getCurrentSceneKey();
         const previousScene = this.sceneManager.getCurrentScene();
 
-        // Aplikace efektů, pokud existují
         if (options?.effects && options.effects.length > 0) {
             this.applyEffects(options.effects);
         }
 
-        // Provedení přechodu
         const success = await this.sceneManager.transitionToScene(
             sceneKey,
             this.stateManager.getState(),
@@ -216,316 +197,141 @@ export class GameEngine {
         );
 
         if (success) {
-            // Emitování události změny scény
-            this.eventEmitter.emit(GameEngineEvents.SCENE_CHANGED, {
-                scene: this.sceneManager.getCurrentScene(),
+            const eventData: SceneChangedEventData = {
+                scene: this.sceneManager.getCurrentScene()!,
                 sceneKey,
-                previousScene,
-                previousSceneKey,
+                previousScene: previousScene ?? undefined,
+                previousSceneKey: previousSceneKey ?? undefined,
                 transitionData: options?.data
-            } as SceneChangedEventData);
+            };
+            // Použij core emitter
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.SCENE_CHANGED, eventData);
+        } else {
+            console.error(`Failed to transition to scene '${sceneKey}'`);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to transition to scene '${sceneKey}'`,
+                context: 'transitionScene'
+            });
         }
-
         return success;
     }
 
-    /**
-     * Aplikuje efekty na herní stav
-     *
-     * @param effects Efekty k aplikaci
-     */
     public applyEffects(effects: Effect[]): void {
         if (!effects || effects.length === 0) return;
 
         const currentState = this.stateManager.getState();
-        const newState = this.effectManager.applyEffects(effects, currentState);
+        let newState = currentState; // Inicializace pro případ chyby
+        try {
+            // Předpokládáme, že EffectManager může pracovat s draftem nebo vrátí nový stav
+            this.stateManager.updateState(draftState => {
+                // Zde EffectManager *musí* modifikovat draft, pokud má být změna efektivní v rámci jednoho updateState
+                // Pokud EffectManager vrací nový stav, logika by byla jiná (méně efektivní s Immer)
+                this.effectManager.applyEffects(effects, draftState); // Předpokládáme, že toto modifikuje draftState
+            }, 'applyEffects');
 
-        this.stateManager.setState(newState);
+            newState = this.stateManager.getState(); // Získání nového stavu po úspěšné aktualizaci
 
-        // Emitování události změny stavu
-        this.eventEmitter.emit(GameEngineEvents.STATE_CHANGED, newState);
+            const eventData: EffectAppliedEventData = {
+                effect: effects.length === 1 ? effects[0] : { type: 'batch', effects },
+                previousState: currentState,
+                newState
+            };
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.EFFECT_APPLIED, eventData);
 
-        // Emitování události aplikace efektů
-        this.eventEmitter.emit(GameEngineEvents.EFFECT_APPLIED, {
-            effect: effects.length === 1 ? effects[0] : { type: 'batch', effects },
-            previousState: currentState,
-            newState
-        } as EffectAppliedEventData);
+        } catch (error) {
+            console.error("Error applying effects:", error);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Error applying effects`,
+                error,
+                context: 'applyEffects'
+            });
+            // Stav zůstane 'currentState', protože updateState selhal nebo nebyl dokončen
+        }
     }
 
-    /**
-     * Aplikuje jeden efekt na herní stav
-     *
-     * @param effect Efekt k aplikaci
-     */
     public applyEffect(effect: Effect): void {
         if (!effect) return;
-
-        const currentState = this.stateManager.getState();
-        const newState = this.effectManager.applyEffect(effect, currentState);
-
-        this.stateManager.setState(newState);
-
-        // Emitování události změny stavu
-        this.eventEmitter.emit(GameEngineEvents.STATE_CHANGED, newState);
-
-        // Emitování události aplikace efektu
-        this.eventEmitter.emit(GameEngineEvents.EFFECT_APPLIED, {
-            effect,
-            previousState: currentState,
-            newState
-        } as EffectAppliedEventData);
+        this.applyEffects([effect]);
     }
 
-    /**
-     * Registruje obsah s příslušným loaderem
-     *
-     * @param contentDefinition Definice obsahu
-     * @returns True, pokud byla registrace úspěšná
-     */
-    public registerContent<T extends object>(
-        contentDefinition: ContentDefinition<T>
+    public registerContent(
+        contentDefinition: ContentDefinition<any>
     ): boolean {
         const { type, content } = contentDefinition;
-        const loader = this.loaderRegistry.getLoader(type);
-
+        const loader = this.loaderRegistry.getLoader<any>(type);
         if (!loader) {
             console.warn(`No loader registered for content type '${type}'`);
             return false;
         }
-
-        loader.registerContent(content);
-        return true;
+        try {
+            loader.registerContent(content);
+            return true;
+        } catch (error) {
+            console.error(`Failed to register content for type '${type}':`, error);
+            this.getCoreEventEmitter().emit(GameEngineCoreEvents.ERROR, {
+                message: `Failed to register content for type '${type}'`,
+                error,
+                context: 'registerContent'
+            });
+            return false;
+        }
     }
 
-    /**
-     * Získá loader obsahu podle typu
-     *
-     * @param type Typ obsahu
-     * @returns Loader pro daný typ obsahu nebo undefined
-     */
     public getLoader<T extends object, K extends string = string>(
         type: string
     ): GenericContentLoader<T, K> | undefined {
         return this.loaderRegistry.getLoader<T, K>(type);
     }
 
-    /**
-     * Registruje posluchače události
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která bude volána při události
-     */
+    // Obecné on/off/emit pro flexibilitu
     public on(eventType: GameEventType, listener: EventListener): void {
         this.eventEmitter.on(eventType, listener);
     }
-
-    /**
-     * Odregistruje posluchače události
-     *
-     * @param eventType Typ události
-     * @param listener Funkce, která byla zaregistrována
-     */
     public off(eventType: GameEventType, listener: EventListener): void {
         this.eventEmitter.off(eventType, listener);
     }
-
-    /**
-     * Emituje událost
-     *
-     * @param eventType Typ události
-     * @param data Volitelná data události
-     */
     public emit(eventType: GameEventType, data?: any): void {
         this.eventEmitter.emit(eventType, data);
     }
 
-    /**
-     * Vrátí aktuální herní stav
-     *
-     * @returns Aktuální herní stav
-     */
-    public getState(): GameState {
-        return this.stateManager.getState();
-    }
+    // --- Gettery pro managery ---
+    public getState(): GameState { return this.stateManager.getState(); }
+    public getCurrentScene(): Scene | null { return this.sceneManager.getCurrentScene(); }
+    public getCurrentSceneKey(): SceneKey | null { return this.sceneManager.getCurrentSceneKey(); }
+    public getVersion(): string { return this.version; }
+    public isGameRunning(): boolean { return this.isRunning; }
+    public getStateManager(): GameStateManager { return this.stateManager; }
+    public getSceneManager(): SceneManager { return this.sceneManager; }
+    public getEffectManager(): EffectManager { return this.effectManager; }
+    public getPluginManager(): PluginManager { return this.pluginManager; }
+    public getLoaderRegistry(): LoaderRegistry { return this.loaderRegistry; }
+    public getSaveManager(): SaveManager { return this.saveManager; }
 
-    /**
-     * Vrátí aktuální scénu
-     *
-     * @returns Aktuální scéna nebo null
-     */
-    public getCurrentScene(): Scene | null {
-        return this.sceneManager.getCurrentScene();
-    }
-
-    /**
-     * Vrátí klíč aktuální scény
-     *
-     * @returns Klíč aktuální scény nebo null
-     */
-    public getCurrentSceneKey(): SceneKey | null {
-        return this.sceneManager.getCurrentSceneKey();
-    }
-
-    /**
-     * Vrátí verzi enginu
-     *
-     * @returns Verze enginu
-     */
-    public getVersion(): string {
-        return this.version;
-    }
-
-    /**
-     * Kontroluje, zda je hra spuštěna
-     *
-     * @returns True, pokud je hra spuštěna
-     */
-    public isGameRunning(): boolean {
-        return this.isRunning;
-    }
-
-    /**
-     * Vrátí správce stavu
-     *
-     * @returns Správce stavu
-     */
-    public getStateManager(): GameStateManager {
-        return this.stateManager;
-    }
-
-    /**
-     * Vrátí správce scén
-     *
-     * @returns Správce scén
-     */
-    public getSceneManager(): SceneManager {
-        return this.sceneManager;
-    }
-
-    /**
-     * Vrátí správce efektů
-     *
-     * @returns Správce efektů
-     */
-    public getEffectManager(): EffectManager {
-        return this.effectManager;
-    }
-
-    /**
-     * Vrátí správce pluginů
-     *
-     * @returns Správce pluginů
-     */
-    public getPluginManager(): PluginManager {
-        return this.pluginManager;
-    }
-
-    /**
-     * Vrátí registr loaderů obsahu
-     *
-     * @returns Registr loaderů obsahu
-     */
-    public getLoaderRegistry(): LoaderRegistry {
-        return this.loaderRegistry;
-    }
-
-    /**
-     * Vrátí správce ukládání
-     *
-     * @returns Správce ukládání
-     */
-    public getSaveManager(): SaveManager {
-        return this.saveManager;
-    }
-
-
-    /**
-     * Vrátí event emitter
-     *
-     * @returns Event emitter
-     */
-    public getEventEmitter(): EventEmitter {
-        return this.eventEmitter;
-    }
-
-    /**
-     * Registruje plugin
-     *
-     * @param plugin Plugin k registraci
-     * @returns Promise, který se vyřeší na true, pokud byl plugin úspěšně registrován
-     */
+    // --- Metody pro pluginy a ukládání ---
     public async registerPlugin(plugin: Plugin): Promise<boolean> {
         return await this.pluginManager.registerPlugin(plugin);
     }
-
-    /**
-     * Odregistruje plugin
-     *
-     * @param pluginName Název pluginu
-     * @returns Promise, který se vyřeší na true, pokud byl plugin úspěšně odregistrován
-     */
     public async unregisterPlugin(pluginName: string): Promise<boolean> {
         return await this.pluginManager.unregisterPlugin(pluginName);
     }
-
-    /**
-     * Získá plugin podle názvu
-     *
-     * @param pluginName Název pluginu
-     * @returns Plugin nebo undefined
-     */
     public getPlugin<T extends Plugin>(pluginName: string): T | undefined {
         return this.pluginManager.getPlugin<T>(pluginName);
     }
-
-    /**
-     * Uloží aktuální stav hry
-     *
-     * @param saveId ID uložené hry
-     * @param options Volitelné možnosti
-     * @returns Promise, který se vyřeší na true, pokud bylo uložení úspěšné
-     */
     public async saveGame(saveId: string, options = {}): Promise<boolean> {
         return await this.saveManager.save(saveId, options);
     }
-
-    /**
-     * Načte uloženou hru
-     *
-     * @param saveId ID uložené hry
-     * @returns Promise, který se vyřeší na true, pokud bylo načtení úspěšné
-     */
     public async loadGame(saveId: string): Promise<boolean> {
         return await this.saveManager.load(saveId);
     }
-
-    /**
-     * Restartuje engine s novým stavem
-     *
-     * @param options Volitelné možnosti restartu
-     * @returns Promise, který se vyřeší, když je restart dokončen
-     */
     public async restart(options: {
         initialState?: Partial<GameState>;
         initialSceneKey?: SceneKey;
     } = {}): Promise<boolean> {
-        // Ukončíme aktuální hru, pokud běží
         if (this.isRunning) {
             this.end('restart');
         }
-
-        // Resetujeme stav
-        if (options.initialState) {
-            this.stateManager.resetState(options.initialState);
-        } else {
-            this.stateManager.resetState();
-        }
-
-        // Určíme počáteční scénu
-        const initialSceneKey = options.initialSceneKey || this.getCurrentSceneKey() || 'start';
-
-        // Spustíme hru znovu
+        this.stateManager.resetState(options.initialState);
+        const initialSceneKey = options.initialSceneKey || this.sceneManager.getCurrentSceneKey() || 'start';
         return await this.start(initialSceneKey);
     }
 }

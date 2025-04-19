@@ -1,13 +1,23 @@
 /**
+ * Registry obsahu s podporou lazy-loadingu
+ * @template T Typ obsahu (hodnoty v registru)
+ * @template K Typ klíče obsahu
+ */
+export type ContentRegistry<T extends object, K extends string = string> = {
+    [key: string]: T | (() => Promise<T | { default: T }>);
+};
+
+/**
  * Obecné rozhraní pro definici obsahu k registraci
  * @template T Typ HODNOTY v registru (např. Scene, Item)
  */
-export interface ContentDefinition<T extends object> {
+export interface ContentDefinition<T extends object> { // Přidáno omezení T extends object
     /** Identifikátor typu obsahu (např. 'scenes', 'items') */
     type: string;
     /** Registry obsahu pro daný typ */
-    content: ContentRegistry<T>;
+    content: ContentRegistry<T>; // <--- Změna zde: content je nyní typu ContentRegistry<T>
 }
+
 
 /**
  * Funkce pro načtení obsahu podle ID
@@ -21,15 +31,6 @@ export type ContentLoader<T, ID = string> = (id: ID) => Promise<T>;
  * @template ID Typ identifikátoru obsahu
  */
 export type ContentChecker<ID = string> = (id: ID) => boolean;
-
-/**
- * Registry obsahu s podporou lazy-loadingu
- * @template T Typ obsahu
- * @template K Typ klíče obsahu
- */
-export type ContentRegistry<T extends object, K extends string = string> = {
-    [key: string]: T | (() => Promise<T | { default: T }>);
-};
 
 /**
  * Možnosti pro vytvoření content loaderu

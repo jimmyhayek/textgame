@@ -1,121 +1,95 @@
-import { Scene } from '../scene/types';
-import { GameStateManager } from '../state/GameStateManager';
-import { EffectManager } from '../effect/EffectManager';
-import { PluginManager } from '../plugin/PluginManager';
-import { LoaderRegistry } from '../content/LoaderRegistry';
-import { EventEmitter } from '../event/EventEmitter';
-import { SaveManager } from '../save/SaveManager';
-import { GameState } from '../state/types';
-import { SaveStorage } from '../save/types';
-import { GenericContentLoader } from '../content/GenericContentLoader';
-import { Plugin } from '../plugin/types';
-import { SceneKey, SceneTransitionOptions } from '../scene/types';
-import { Effect } from '../effect/types';
+import { Scene, SceneKey } from '../scene';
+import { GameState, GameStateManagerEvents, StateManagerPersistenceEvents } from '../state';
+import { Effect } from '../effect';
+import { Plugin, PluginEventMap } from '../plugin';
+import { SaveManager, SaveStorage, SaveEventMap } from '../save';
+import { GenericContentLoader } from '../content';
+import { EventEmitter } from '../event';
 
-/**
- * Možnosti konfigurace herního enginu
- */
+/** Možnosti konfigurace herního enginu */
 export interface GameEngineOptions {
-    /** Loader scén pro načítání herního obsahu */
     sceneLoader: GenericContentLoader<Scene>;
-
-    /** Počáteční stav hry, který bude sloučen s výchozím prázdným stavem */
     initialState?: Partial<GameState>;
-
-    /** Pluginy, které budou registrovány s enginem */
     plugins?: Plugin[];
-
-    /** SaveManager pro ukládání a načítání her (volitelné) */
     saveManager?: SaveManager;
-
-    /** Verze enginu pro ukládání her (volitelné) */
     engineVersion?: string;
-
-    /** Event emitter pro události enginu (volitelné) */
     eventEmitter?: EventEmitter;
-
-    /** Úložiště pro ukládání her (volitelné) */
     saveStorage?: SaveStorage;
-
-    /** Další konfigurační možnosti specifické pro implementaci */
+    allowPluginOverride?: boolean; // Příklad
+    storagePrefix?: string; // Příklad
     [key: string]: any;
 }
 
-/**
- * Události emitované herním enginem
- */
-export enum GameEngineEvents {
-    /** Hra byla zahájena */
-    GAME_STARTED = 'gameStarted',
-
-    /** Hra byla ukončena */
-    GAME_ENDED = 'gameEnded',
-
-    /** Došlo ke změně scény */
-    SCENE_CHANGED = 'sceneChanged',
-
-    /** Došlo ke změně stavu */
-    STATE_CHANGED = 'stateChanged',
-
-    /** Byl aplikován efekt na stav */
-    EFFECT_APPLIED = 'effectApplied',
-
-    /** Došlo k chybě v enginu */
-    ERROR = 'engineError'
+/** Události emitované *přímo* herním enginem (core události) */
+export enum GameEngineCoreEvents { // Přejmenováno pro odlišení
+    GAME_STARTED = 'game:started',
+    GAME_ENDED = 'game:ended',
+    SCENE_CHANGED = 'scene:changed', // Scéna se změnila (z pohledu enginu)
+    EFFECT_APPLIED = 'effect:applied', // Efekt byl aplikován (z pohledu enginu)
+    ERROR = 'engine:error' // Obecná chyba enginu
+    // STATE_CHANGED se nyní emituje z GameStateManageru
 }
 
-/**
- * Data předávaná při události startu hry
- */
+// --- Typy dat pro Core události ---
+
+/** Data předávaná při události startu hry */
 export interface GameStartedEventData {
-    /** Klíč počáteční scény */
     sceneKey: SceneKey;
-
-    /** Volitelná data předaná při startu */
     transitionData?: any;
 }
 
-/**
- * Data předávaná při události konce hry
- */
+/** Data předávaná při události konce hry */
 export interface GameEndedEventData {
-    /** Důvod ukončení hry */
     reason?: string;
-
-    /** Další data o ukončení */
     [key: string]: any;
 }
 
-/**
- * Data předávaná při události změny scény
- */
+/** Data předávaná při události změny scény */
 export interface SceneChangedEventData {
-    /** Nová scéna */
     scene: Scene;
-
-    /** Klíč nové scény */
     sceneKey: SceneKey;
-
-    /** Předchozí scéna */
     previousScene?: Scene;
-
-    /** Klíč předchozí scény */
     previousSceneKey?: SceneKey;
-
-    /** Volitelná data předaná při přechodu */
     transitionData?: any;
 }
 
-/**
- * Data předávaná při události aplikace efektu
- */
+/** Data předávaná při události aplikace efektu */
 export interface EffectAppliedEventData {
-    /** Aplikovaný efekt */
-    effect: Effect;
-
-    /** Stav před aplikací efektu */
+    effect: Effect | { type: 'batch', effects: Effect[] }; // Zahrnuje i batch pro applyEffects
     previousState: GameState;
-
-    /** Stav po aplikaci efektu */
     newState: GameState;
 }
+
+/** Data předávaná při události chyby enginu */
+export interface EngineErrorEventData {
+    message: string;
+    error?: Error | unknown;
+    context?: string; // Kde chyba nastala
+}
+
+// --- Mapa pro Core události ---
+export type EngineCoreEventMap = {
+    [GameEngineCoreEvents.GAME_STARTED]: GameStartedEventData;
+    [GameEngineCoreEvents.GAME_ENDED]: GameEndedEventData;
+    [GameEngineCoreEvents.SCENE_CHANGED]: SceneChangedEventData;
+    [GameEngineCoreEvents.EFFECT_APPLIED]: EffectAppliedEventData;
+    [GameEngineCoreEvents.ERROR]: EngineErrorEventData;
+};
+
+
+/**
+ * Sjednocená mapa VŠECH událostí, které mohou procházet přes engine emitter.
+ * Zahrnuje core události, události pluginů, ukládání a stavu.
+ * Používá se pro typování hlavního `TypedEventEmitter` v GameEngine.
+ * Použití `<any>` pro generické typy stavu je zde kompromis,
+ * pokud nechceme mít GameEngine závislý na konkrétním typu T stavu.
+ */
+export type EngineEventMap = EngineCoreEventMap
+    & PluginEventMap
+    & SaveEventMap
+    & GameStateManagerEvents<any> // Události runtime stavu
+    & StateManagerPersistenceEvents<any>; // Události persistence stavu
+
+
+// Přejmenování enum pro konzistenci (můžeš použít i původní GameEngineEvents, pokud chceš)
+export const GameEngineEvents = GameEngineCoreEvents;

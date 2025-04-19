@@ -1,12 +1,12 @@
 /**
- * Obecné rozhraní pro definici obsahu
- * @template T Typ obsahu
+ * Obecné rozhraní pro definici obsahu k registraci
+ * @template T Typ HODNOTY v registru (např. Scene, Item)
  */
-export interface ContentDefinition<T> {
-    /** Identifikátor typu obsahu */
+export interface ContentDefinition<T extends object> {
+    /** Identifikátor typu obsahu (např. 'scenes', 'items') */
     type: string;
-    /** Definice obsahu */
-    content: T;
+    /** Registry obsahu pro daný typ */
+    content: ContentRegistry<T>;
 }
 
 /**

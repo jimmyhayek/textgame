@@ -1,9 +1,10 @@
-import { GameEngine } from '../engine/GameEngine';
+import { GameEngine } from '../engine';
 import { Plugin, PluginOptions } from './types';
-import { GenericContentLoader } from '../content/GenericContentLoader';
-import { Effect, EffectProcessor } from '../effect/types';
-import { GameState, GameEventType, EventListener } from '../state/types';
-import { SceneKey } from '../scene/types';
+import { GenericContentLoader } from '../content';
+import { Effect, EffectProcessor } from '../effect';
+import { GameState } from '../state';
+import { GameEventType, EventListener } from '../event';
+import { SceneKey } from '../scene';
 
 /**
  * Abstraktní základní třída pro pluginy
@@ -69,7 +70,7 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
         this.registerEventHandlers();
 
         // Registrace procesorů efektů
-        this.registerEffectProcessors();
+        this.setupEffectProcessors();
 
         // Spuštění inicializace specifické pro plugin
         await this.onInitialize();
@@ -96,7 +97,7 @@ export abstract class AbstractPlugin<Options extends PluginOptions = PluginOptio
      * Registruje procesory efektů v enginu
      * Přepište tuto metodu pro registraci procesorů specifických pro plugin
      */
-    protected registerEffectProcessors(): void {
+    protected setupEffectProcessors(): void {
         // Přepište v potomkovi pro registraci specifických procesorů efektů
     }
 

@@ -36,7 +36,7 @@ export interface SaveMetadata {
     /**
      * Verze formátu uložené hry
      */
-    saveVersion: number;
+    saveDataFormatVersion: number;
 
     /**
      * Klíč aktuální scény v době uložení

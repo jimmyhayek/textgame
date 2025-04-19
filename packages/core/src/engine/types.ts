@@ -5,7 +5,6 @@ import { PluginManager } from '../plugin/PluginManager';
 import { LoaderRegistry } from '../content/LoaderRegistry';
 import { EventEmitter } from '../event/EventEmitter';
 import { SaveManager } from '../save/SaveManager';
-import { EntityManager } from '../entity/EntityManager';
 import { GameState } from '../state/types';
 import { SaveStorage } from '../save/types';
 import { GenericContentLoader } from '../content/GenericContentLoader';

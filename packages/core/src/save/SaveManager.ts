@@ -165,7 +165,7 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
      * @returns Promise rozhodnutý na true, pokud bylo uložení úspěšné.
      */
     public async save(saveId: string, options: SaveOptions = {}): Promise<boolean> {
-        if (!saveId || typeof saveId !== 'string') {
+        if (!saveId) {
             console.error("SaveManager: Invalid save ID provided.", saveId);
             this.eventEmitter.emit(SaveEvents.GAME_SAVED, { saveId, success: false, error: 'invalid id' });
             return false;

@@ -1,18 +1,18 @@
 import { GenericContentLoader } from './GenericContentLoader';
 
 /**
- * Registry pro správu multiple content loaderů
- * Poskytuje centrální bod pro registraci a přístup k loaderům pro různé typy obsahu
+ * Registry for managing multiple content loaders
+ * Provides a central point for registering and accessing loaders for different content types
  */
 export class LoaderRegistry {
-    /** Mapa loaderů organizovaná podle typu */
+    /** Map of loaders organized by type */
     private loaders: Map<string, GenericContentLoader<any, any>> = new Map();
 
     /**
-     * Registruje loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @param loader Instance loaderu pro daný typ obsahu
-     * @returns Instance registru pro řetězení
+     * Registers a loader for a specific content type
+     * @param type Content type identifier
+     * @param loader Loader instance for the content type
+     * @returns This registry instance for chaining
      */
     public registerLoader<T extends object, K extends string = string>(
         type: string,
@@ -23,11 +23,11 @@ export class LoaderRegistry {
     }
 
     /**
-     * Získá loader pro specifický typ obsahu
-     * @template T Typ obsahu
-     * @template K Typ klíče obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns Instance loaderu pro daný typ obsahu nebo undefined pokud nenalezen
+     * Gets a loader for a specific content type
+     * @template T Content type
+     * @template K Content ID type
+     * @param type Content type identifier
+     * @returns Loader instance for the content type or undefined if not found
      */
     public getLoader<T extends object, K extends string = string>(
         type: string
@@ -36,43 +36,28 @@ export class LoaderRegistry {
     }
 
     /**
-     * Kontroluje, zda existuje loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns True pokud loader existuje, false jinak
+     * Checks if a loader for a specific content type exists
+     * @param type Content type identifier
+     * @returns True if loader exists, false otherwise
      */
     public hasLoader(type: string): boolean {
         return this.loaders.has(type);
     }
 
     /**
-     * Získá všechny registrované typy obsahu
-     * @returns Pole identifikátorů typů obsahu
+     * Gets all registered content types
+     * @returns Array of content type identifiers
      */
     public getContentTypes(): string[] {
         return Array.from(this.loaders.keys());
     }
 
     /**
-     * Odstraní loader pro specifický typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @returns True pokud byl loader odstraněn, false pokud neexistoval
+     * Removes a loader for a specific content type
+     * @param type Content type identifier
+     * @returns True if loader was removed, false if it didn't exist
      */
     public removeLoader(type: string): boolean {
         return this.loaders.delete(type);
     }
-
-    /**
-     * Načte obsah specifického typu podle klíče
-     * @template T Typ obsahu
-     * @param type Identifikátor typu obsahu
-     * @param key Klíč obsahu
-     * @returns Promise s načteným obsahem
-     * @throws Error pokud typ obsahu není registrován nebo obsah neexistuje
-     */
-    public async loadContent<T extends object>(type: string, key: string): Promise<T> {
-        const loader = this.getLoader<T>(type);
-        if (!loader) {
-            throw new Error(`No loader registered for content type '${type}'`);
-        }
-
-        return await loader.loa
+}

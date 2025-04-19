@@ -5,9 +5,4 @@ export * from './types';
 export { GameEngine } from './GameEngine';
 
 // Export utilit
-export {
-    createGameEngine,
-    createSimpleGameEngine,
-    createDebugGameEngine,
-    preloadAllScenes
-} from './utils';
+export { createGameEngine } from './utils';

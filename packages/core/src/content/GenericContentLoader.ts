@@ -1,5 +1,23 @@
 import { produce } from '../utils/immer';
-import { ContentRegistry, ContentLoaderOptions } from './types';
+
+/**
+ * Interface pro definování content registry s lazy-loading podporou
+ * @template T Typ načítaného obsahu
+ * @template K Typ identifikátoru obsahu (obvykle string)
+ */
+export interface ContentRegistry<T, K extends string = string> {
+    [key: string]: T | (() => Promise<T | { default: T }>);
+}
+
+/**
+ * Konfigurační možnosti pro content loader
+ * @template T Typ načítaného obsahu
+ * @template K Typ identifikátoru obsahu (obvykle string)
+ */
+export interface ContentLoaderOptions<T extends object, K extends string = string> {
+    /** Počáteční registry obsahu */
+    initialRegistry?: ContentRegistry<T, K>;
+}
 
 /**
  * Generický loader pro herní obsah s podporou lazy-loadingu
@@ -73,4 +91,80 @@ export class GenericContentLoader<T extends object, K extends string = string> {
             const loadFunction = contentDefOrImport as () => Promise<T | { default: T }>;
             loadPromise = loadFunction().then((module): T => {
                 // Kontrola, zda máme default export (ES module) nebo přímý obsah
-                const content = this.isMo
+                const content = this.isModuleWithDefault(module) ? module.default : module;
+
+                // Přidáme _key do načteného obsahu
+                const enhancedContent = typeof content === 'object' && content !== null
+                    ? { ...content, _key: key }
+                    : content;
+
+                this.loadedContent.set(key, enhancedContent);
+                return enhancedContent;
+            });
+        } else {
+            // Zpracování přímého obsahu
+            const content = typeof contentDefOrImport === 'object' && contentDefOrImport !== null
+                ? { ...contentDefOrImport, _key: key }
+                : contentDefOrImport;
+
+            loadPromise = Promise.resolve(content);
+            this.loadedContent.set(key, content);
+        }
+
+        this.loadingPromises.set(key, loadPromise);
+        return loadPromise;
+    }
+
+    /**
+     * Kontroluje, zda obsah s daným klíčem existuje v registry
+     * @param key Klíč obsahu
+     * @returns True pokud obsah existuje, false jinak
+     */
+    public hasContent(key: string): boolean {
+        return key in this.registry;
+    }
+
+    /**
+     * Získá všechny klíče obsahu registrované v loaderu
+     * @returns Pole klíčů obsahu
+     */
+    public getContentKeys(): string[] {
+        return Object.keys(this.registry);
+    }
+
+    /**
+     * Předem načte obsah podle klíčů
+     * @param keys Volitelné pole klíčů obsahu k načtení, načte veškerý obsah pokud není uvedeno
+     * @returns Promise, který se vyřeší, když je veškerý obsah načten
+     */
+    public async preloadContent(keys?: string[]): Promise<void> {
+        const keysToLoad: string[] = keys || this.getContentKeys();
+        await Promise.all(keysToLoad.map(key => this.loadContent(key)));
+    }
+
+    /**
+     * Získá podkladový registry obsahu
+     * @returns Aktuální registry obsahu
+     */
+    public getRegistry(): ContentRegistry<T, K> {
+        return this.registry;
+    }
+
+    /**
+     * Vyčistí cache a načte veškerý obsah znovu při příštím požadavku
+     */
+    public clearCache(): void {
+        this.loadedContent.clear();
+        this.loadingPromises.clear();
+    }
+
+    /**
+     * Type guard pro kontrolu, zda objekt má default export
+     * @param obj Objekt ke kontrole
+     * @returns True pokud objekt má default vlastnost typu T
+     * @private
+     */
+    private isModuleWithDefault(obj: any): obj is { default: T } {
+        return obj && typeof obj === 'object' && 'default' in obj;
+    }
+}

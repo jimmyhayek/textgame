@@ -101,11 +101,6 @@ src/
     object.ts
     uuid.ts
   index.ts
-test/
-  integration/
-    GameEngine.integration.test.ts
-  unit/
-    SaveManager.test.ts
 .prettierignore
 .prettierrc.js
 eslint.config.mjs
@@ -221,7 +216,15 @@ export class GenericContentLoader<T extends object, K extends string = string> {
                     : content;
 
                 this.loadedContent.set(key, enhancedContent);
+                // Odstraníme promise z loadingPromises po úspěšném načtení
+                this.loadingPromises.delete(key);
                 return enhancedContent;
+            }).catch(error => {
+                // Odstraníme promise z loadingPromises i v případě chyby
+                this.loadingPromises.delete(key);
+                console.error(`Failed to load content for key "${key}":`, error);
+                // Znovu vyhodíme chybu, aby ji mohl zachytit volající (např. preloadContent)
+                throw error;
             });
         } else {
             // Zpracování přímého obsahu
@@ -233,7 +236,11 @@ export class GenericContentLoader<T extends object, K extends string = string> {
             this.loadedContent.set(key, content);
         }
 
-        this.loadingPromises.set(key, loadPromise);
+        // Uložíme promise POUZE pokud se jedná o skutečné načítání (lazy-load)
+        if (typeof contentDefOrImport === 'function') {
+            this.loadingPromises.set(key, loadPromise);
+        }
+
         return loadPromise;
     }
 
@@ -255,13 +262,53 @@ export class GenericContentLoader<T extends object, K extends string = string> {
     }
 
     /**
-     * Předem načte obsah podle klíčů
-     * @param keys Volitelné pole klíčů obsahu k načtení, načte veškerý obsah pokud není uvedeno
-     * @returns Promise, který se vyřeší, když je veškerý obsah načten
+     * Předem načte obsah podle klíčů.
+     * Pokud klíč odkazuje na již načtený obsah, nic se neděje.
+     * Pokud klíč odkazuje na lazy-loaded obsah, spustí jeho načítání.
+     *
+     * @param keys Volitelné pole klíčů obsahu k načtení. Pokud není uvedeno,
+     *             pokusí se načíst veškerý *lazy-loaded* obsah registrovaný v loaderu.
+     * @returns Promise, který se vyřeší, když jsou všechny požadované položky načteny (nebo jejich načítání selhalo).
+     *          Promise bude *rejected*, pokud načtení *alespoň jedné* položky selže.
+     * @throws Error pokud načtení některé z položek selže.
      */
     public async preloadContent(keys?: string[]): Promise<void> {
-        const keysToLoad: string[] = keys || this.getContentKeys();
-        await Promise.all(keysToLoad.map(key => this.loadContent(key)));
+        let keysToLoad: string[];
+
+        if (keys) {
+            // Pokud jsou klíče specifikovány, filtrujeme jen ty, které jsou v registry
+            keysToLoad = keys.filter(key => this.hasContent(key));
+        } else {
+            // Pokud nejsou klíče specifikovány, vezmeme všechny klíče z registry,
+            // které odpovídají lazy-loading funkcím a ještě nebyly načteny.
+            keysToLoad = this.getContentKeys().filter(key =>
+                typeof this.registry[key] === 'function' &&
+                !this.loadedContent.has(key) &&
+                !this.loadingPromises.has(key) // Nepokoušíme se znovu načítat, co se už načítá
+            );
+        }
+
+        if (keysToLoad.length === 0) {
+            // Není co načítat
+            return Promise.resolve();
+        }
+
+        console.log(`Preloading content for keys: ${keysToLoad.join(', ')}`);
+
+        // Vytvoříme pole promises voláním loadContent pro každý klíč.
+        // loadContent() inteligentně použije cache nebo existující loading promises.
+        const preloadPromises = keysToLoad.map(key => this.loadContent(key));
+
+        // Použijeme Promise.all ke spuštění všech načítání paralelně.
+        // Promise.all se rejectne, pokud jakýkoli z vnitřních promises selže.
+        try {
+            await Promise.all(preloadPromises);
+            console.log(`Successfully preloaded content for keys: ${keysToLoad.join(', ')}`);
+        } catch (error) {
+            // Chyba byla již zalogována v loadContent, zde ji jen přepošleme dál
+            console.error(`Error occurred during preloading content.`);
+            throw error; // Umožní volajícímu zjistit, že preload selhal
+        }
     }
 
     /**
@@ -273,11 +320,13 @@ export class GenericContentLoader<T extends object, K extends string = string> {
     }
 
     /**
-     * Vyčistí cache a načte veškerý obsah znovu při příštím požadavku
+     * Vyčistí cache načteného obsahu a běžících načítání.
+     * Obsah bude znovu načten při příštím požadavku (loadContent nebo preloadContent).
      */
     public clearCache(): void {
         this.loadedContent.clear();
         this.loadingPromises.clear();
+        console.log('Content loader cache cleared.');
     }
 
     /**
@@ -287,7 +336,8 @@ export class GenericContentLoader<T extends object, K extends string = string> {
      * @private
      */
     private isModuleWithDefault(obj: any): obj is { default: T } {
-        return obj && typeof obj === 'object' && 'default' in obj;
+        // Přidána kontrola, zda obj není null, a zda 'default' existuje
+        return obj && typeof obj === 'object' && true && 'default' in obj;
     }
 }
 </file>
@@ -304,6 +354,7 @@ export { LoaderRegistry } from './LoaderRegistry';
 export {
     createContentLoader,
     defineContent,
+    defineScenes,
     mergeContentRegistries,
     generateContentKey,
     extractContentKeys,
@@ -449,6 +500,7 @@ export interface ContentRegisteredEvent {
 
 <file path="src/content/utils.ts">
 import { ContentRegistry, ContentDefinition } from './types';
+import { Scene } from '../scene';
 import { GenericContentLoader } from './GenericContentLoader';
 
 /**
@@ -480,6 +532,16 @@ export function defineContent<T extends object>( // Omezení T extends object
     return { type, content: contentRegistry };
 }
 
+/**
+ * Zjednodušená utilita pro definování registru scén.
+ * Automaticky nastavuje typ obsahu na 'scenes'.
+ * @param registry Objekt mapující klíče scén (string) na objekty Scene nebo funkce pro lazy-loading.
+ * @returns Objekt ContentDefinition<Scene> připravený pro registraci v enginu.
+ */
+export function defineScenes(registry: ContentRegistry<Scene>): ContentDefinition<Scene> {
+    // Interně volá generickou funkci defineContent s předvyplněným typem
+    return defineContent<Scene>('scenes', registry);
+}
 
 /**
  * Spojí více registrů obsahu do jednoho
@@ -6237,400 +6299,6 @@ export * from './effect';
 export * from './plugin';
 export * from './save';
 export * from './utils';
-</file>
-
-<file path="test/integration/GameEngine.integration.test.ts">
-import { GameEngine } from '../../src/core/GameEngine';
-import { Scene, Choice, GameState } from '../../src/types';
-import { defineScene, defineScenes, createSceneLoader } from '../../src/utils/defineContent';
-
-describe('GameEngine Integration', () => {
-    let engine: GameEngine;
-
-    // Definujeme testovací scény pomocí nového API
-    const forestIntroScene = defineScene({
-        title: 'Vstup do lesa',
-        content: 'Stojíš na okraji hlubokého lesa.',
-        choices: [
-            {
-                content: 'Prozkoumat les',
-                scene: 'forest/clearing'
-            },
-            {
-                content: 'Jít do vesnice',
-                scene: 'village/square',
-                // Podmínka pro dostupnost volby
-                condition: (state: GameState) => state.variables.hasMap === true
-            }
-        ]
-    });
-
-    const forestClearingScene = defineScene({
-        title: 'Lesní mýtina',
-        content: 'Nacházíš se na malé mýtině uprostřed lesa.',
-        choices: [
-            {
-                content: 'Prohledat mýtinu',
-                // Bez scene property - pouze efekt
-                effects: [
-                    { type: 'SET_VARIABLE', variable: 'hasMap', value: true }
-                ]
-            },
-            {
-                content: 'Vrátit se na okraj lesa',
-                scene: 'forest/intro'
-            }
-        ],
-        onEnter: jest.fn()
-    });
-
-    const villageSquareScene = defineScene({
-        title: 'Vesnické náměstí',
-        content: 'Stojíš na malém náměstí obklopeném dřevěnými domy.',
-        choices: [
-            {
-                content: 'Vrátit se do lesa',
-                scene: 'forest/intro'
-            }
-        ],
-        onEnter: jest.fn()
-    });
-
-    beforeEach(() => {
-        // Resetujeme všechny mock funkce
-        jest.clearAllMocks();
-
-        // Definice scén pomocí nových helper funkcí
-        const scenes = defineScenes({
-            'forest/intro': forestIntroScene,
-            'forest/clearing': forestClearingScene,
-            'village/square': villageSquareScene
-        });
-
-        // Vytvoření loaderu pomocí nového helper
-        const sceneLoader = createSceneLoader(scenes);
-
-        // Vytvoření nové instance enginu s loaderem
-        engine = new GameEngine({
-            sceneLoader,
-            initialState: {
-                visitedScenes: new Set<string>(),
-                variables: {
-                    hasMap: false
-                }
-            }
-        });
-    });
-
-    test('should handle game flow with new API', async () => {
-        // Sledování událostí
-        const eventSpy = jest.fn();
-        engine.on('sceneChanged', eventSpy);
-
-        // Start hry s klíčem scény místo ID
-        await engine.start('forest/intro');
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vstup do lesa' }));
-
-        // Kontrola aktuální scény
-        expect(engine.getCurrentScene()).toBeTruthy();
-        expect(engine.getCurrentScene()?.title).toBe('Vstup do lesa');
-
-        // Kontrola klíče scény - nově používáme getCurrentSceneKey
-        expect(engine.getCurrentSceneKey()).toBe('forest/intro');
-
-        // Zkontrolujeme dostupné volby - měla by být jen jedna
-        let choices = engine.getAvailableChoices();
-        expect(choices.length).toBe(1);
-        expect(choices[0].content).toBe('Prozkoumat les');
-
-        // Výběr volby pomocí indexu, ne ID
-        await engine.selectChoice(0);
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Lesní mýtina' }));
-        expect(forestClearingScene.onEnter).toHaveBeenCalled();
-
-        // Prohledání mýtiny - volba bez přechodu, pouze s efektem
-        await engine.selectChoice(0);
-        expect(engine.getState().variables.hasMap).toBe(true);
-
-        // Měli bychom zůstat na stejné scéně
-        expect(engine.getCurrentSceneKey()).toBe('forest/clearing');
-
-        // Vrátíme se zpět na okraj lesa
-        await engine.selectChoice(1);
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vstup do lesa' }));
-
-        // Teď by měly být dostupné obě volby
-        choices = engine.getAvailableChoices();
-        expect(choices.length).toBe(2);
-
-        // Kontrola obsahu voleb
-        expect(choices[0].content).toBe('Prozkoumat les');
-        expect(choices[1].content).toBe('Jít do vesnice');
-
-        // Jdeme do vesnice, která byla dříve nedostupná
-        await engine.selectChoice(1);
-        expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vesnické náměstí' }));
-        expect(villageSquareScene.onEnter).toHaveBeenCalled();
-
-        // Kontrola stavu
-        const state = engine.getState();
-        // Kontrola, že scény jsou sledovány podle klíče, ne ID
-        expect(state.visitedScenes.size).toBe(3);
-        expect(state.visitedScenes.has('forest/intro')).toBe(true);
-        expect(state.visitedScenes.has('forest/clearing')).toBe(true);
-        expect(state.visitedScenes.has('village/square')).toBe(true);
-    });
-
-    test('should handle choices without scene transition', async () => {
-        await engine.start('forest/clearing');
-
-        // Zaznamenáme počet volání sceneChanged
-        const sceneChangedSpy = jest.fn();
-        engine.on('sceneChanged', sceneChangedSpy);
-
-        // Volíme možnost, která pouze mění stav bez přechodu
-        await engine.selectChoice(0);
-
-        // Kontrola, že stav byl změněn
-        expect(engine.getState().variables.hasMap).toBe(true);
-
-        // Kontrola, že žádný přechod scény nenastal
-        expect(sceneChangedSpy).not.toHaveBeenCalled();
-        expect(engine.getCurrentSceneKey()).toBe('forest/clearing');
-    });
-
-    test('should handle serialization and deserialization with new keys', async () => {
-        await engine.start('forest/intro');
-        await engine.selectChoice(0); // Jít do lesa
-        await engine.selectChoice(0); // Prohledat mýtinu - nastavujeme hasMap na true
-
-        // Serializujeme stav
-        const serializedState = engine.getStateManager().serialize();
-
-        // Vytvoříme novou instanci enginu
-        const scenes = defineScenes({
-            'forest/intro': forestIntroScene,
-            'forest/clearing': forestClearingScene,
-            'village/square': villageSquareScene
-        });
-        const newSceneLoader = createSceneLoader(scenes);
-        const newEngine = new GameEngine({
-            sceneLoader: newSceneLoader
-        });
-
-        // Nastavíme deserializovaný stav
-        newEngine.getStateManager().deserialize(serializedState);
-
-        // Zkontrolujeme, že stav byl správně obnoven
-        const state = newEngine.getState();
-        expect(state.variables.hasMap).toBe(true);
-        expect(state.visitedScenes.has('forest/clearing')).toBe(true);
-
-        // Měli bychom být schopni pokračovat ve hře
-        await newEngine.start('forest/intro'); // Přejde do poslední známé scény
-
-        // Nyní by měla být dostupná volba jít do vesnice
-        const choices = newEngine.getAvailableChoices();
-        expect(choices.length).toBe(2);
-        expect(choices.some(c => c.content === 'Jít do vesnice')).toBe(true);
-    });
-});
-</file>
-
-<file path="test/unit/SaveManager.test.ts">
-import { SaveManager } from '../../src/save/SaveManager';
-import { GameEngine } from '../../src/core/GameEngine';
-import { SaveStorage, SaveData, SaveMetadata } from '../../src/types/save';
-import { Scene, GameState, SceneKey } from '../../src/types';
-import { GenericContentLoader } from '../../src/loaders/GenericContentLoader';
-
-// Mock pro SaveStorage
-class MockSaveStorage implements SaveStorage {
-    private storage: Record<string, SaveData> = {};
-
-    public async save(id: string, data: SaveData): Promise<boolean> {
-        this.storage[id] = { ...data };
-        return true;
-    }
-
-    public async load(id: string): Promise<SaveData | null> {
-        return this.storage[id] || null;
-    }
-
-    public async list(): Promise<Record<string, SaveMetadata>> {
-        const result: Record<string, SaveMetadata> = {};
-        for (const [id, data] of Object.entries(this.storage)) {
-            result[id] = data.metadata;
-        }
-        return result;
-    }
-
-    public async delete(id: string): Promise<boolean> {
-        if (id in this.storage) {
-            delete this.storage[id];
-            return true;
-        }
-        return false;
-    }
-
-    public async exists(id: string): Promise<boolean> {
-        return id in this.storage;
-    }
-
-    // Pomocná metoda pro testy
-    public getStorage(): Record<string, SaveData> {
-        return { ...this.storage };
-    }
-}
-
-describe('SaveManager', () => {
-    let saveManager: SaveManager;
-    let engine: GameEngine;
-    let mockStorage: MockSaveStorage;
-    let sceneLoader: GenericContentLoader<Scene>;
-
-    // Definujeme testovací scény
-    const startScene: Scene = {
-        title: 'Start',
-        content: 'This is the start scene',
-        choices: [
-            {
-                content: 'Go to the forest',
-                scene: 'forest'
-            }
-        ]
-    };
-
-    const forestScene: Scene = {
-        title: 'Forest',
-        content: 'You are in a forest',
-        choices: [
-            {
-                content: 'Go back to start',
-                scene: 'start'
-            }
-        ]
-    };
-
-    beforeEach(() => {
-        // Vytvoření content loaderu se scénami
-        sceneLoader = new GenericContentLoader<Scene>();
-        sceneLoader.registerContent({
-            'start': startScene,
-            'forest': forestScene
-        });
-
-        // Vytvoření enginu
-        engine = new GameEngine({
-            sceneLoader
-        });
-
-        // Vytvoření mock úložiště
-        mockStorage = new MockSaveStorage();
-
-        // Vytvoření SaveManageru
-        saveManager = new SaveManager(engine, {
-            storage: mockStorage,
-            engineVersion: '0.1.0'
-        });
-    });
-
-    test('should save and load a game', async () => {
-        // Spustíme hru a přejdeme do lesa
-        await engine.start('start');
-        await engine.selectChoice(0); // Go to the forest
-
-        // Uložíme hru
-        const saveId = 'test-save';
-        const success = await saveManager.save(saveId, { name: 'Test Save' });
-        expect(success).toBe(true);
-
-        // Kontrola, že byla hra uložena
-        const savedGames = await saveManager.getSaves();
-        expect(Object.keys(savedGames)).toContain(saveId);
-        expect(savedGames[saveId].name).toBe('Test Save');
-        expect(savedGames[saveId].currentSceneKey).toBe('forest');
-
-        // Přejdeme zpět na start
-        await engine.selectChoice(0); // Go back to start
-        expect(engine.getCurrentSceneKey()).toBe('start');
-
-        // Načteme uloženou hru
-        const loadSuccess = await saveManager.load(saveId);
-        expect(loadSuccess).toBe(true);
-
-        // Kontrola, že jsme zpět v lese
-        expect(engine.getCurrentSceneKey()).toBe('forest');
-    });
-
-    test('should handle quickSave and quickLoad', async () => {
-        // Spustíme hru
-        await engine.start('start');
-
-        // Provedeme rychlé uložení
-        const success = await saveManager.quickSave();
-        expect(success).toBe(true);
-
-        // Zkontrolujeme, že quicksave existuje
-        const saves = await saveManager.getSaves();
-        expect('quicksave' in saves).toBe(true);
-
-        // Přejdeme do lesa
-        await engine.selectChoice(0);
-        expect(engine.getCurrentSceneKey()).toBe('forest');
-
-        // Načteme rychlé uložení
-        const loadSuccess = await saveManager.quickLoad();
-        expect(loadSuccess).toBe(true);
-
-        // Zkontrolujeme, že jsme zpět na startu
-        expect(engine.getCurrentSceneKey()).toBe('start');
-    });
-
-    test('should handle save deletion', async () => {
-        // Spustíme hru
-        await engine.start('start');
-
-        // Uložíme hru
-        const saveId = 'delete-test';
-        await saveManager.save(saveId);
-
-        // Zkontrolujeme, že uložení existuje
-        expect(await mockStorage.exists(saveId)).toBe(true);
-
-        // Smažeme uložení
-        const deleteSuccess = await saveManager.deleteSave(saveId);
-        expect(deleteSuccess).toBe(true);
-
-        // Zkontrolujeme, že uložení bylo smazáno
-        expect(await mockStorage.exists(saveId)).toBe(false);
-    });
-
-    test('should track play time', async () => {
-        // Spustíme hru
-        await engine.start('start');
-
-        // Počkáme 100ms
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Uložíme hru
-        const saveId = 'playtime-test';
-        await saveManager.save(saveId);
-
-        // Načteme metadata uložené hry
-        const saves = await saveManager.getSaves();
-        const metadata = saves[saveId];
-
-        // Zkontrolujeme, že čas hraní byl zaznamenán
-        expect(metadata.playTime).toBeGreaterThan(0);
-
-        // Zkontrolujeme, že formátování času funguje
-        const formattedTime = saveManager.formatPlayTime(metadata.playTime);
-        expect(formattedTime).toMatch(/^\d{2}:\d{2}:\d{2}$/);
-    });
-
-    // Další testy podle potřeby...
-});
 </file>
 
 <file path=".prettierignore">

@@ -10,7 +10,7 @@ import {
   ToggleVariableEffect,
   PushToArrayEffect,
   RemoveFromArrayEffect,
-  BuiltInEffectType
+  BuiltInEffectType,
 } from './types';
 import { GameState } from '../state/types';
 
@@ -22,31 +22,39 @@ export function createSetEffect(variable: string, value: any, path?: string): Se
     type: BuiltInEffectType.set,
     variable,
     value,
-    path
+    path,
   };
 }
 
 /**
  * Vytvoří efekt pro zvýšení hodnoty proměnné
  */
-export function createIncrementEffect(variable: string, value = 1, path?: string): IncrementVariableEffect {
+export function createIncrementEffect(
+  variable: string,
+  value = 1,
+  path?: string
+): IncrementVariableEffect {
   return {
     type: BuiltInEffectType.increment,
     variable,
     value,
-    path
+    path,
   };
 }
 
 /**
  * Vytvoří efekt pro snížení hodnoty proměnné
  */
-export function createDecrementEffect(variable: string, value = 1, path?: string): DecrementVariableEffect {
+export function createDecrementEffect(
+  variable: string,
+  value = 1,
+  path?: string
+): DecrementVariableEffect {
   return {
     type: BuiltInEffectType.decrement,
     variable,
     value,
-    path
+    path,
   };
 }
 
@@ -57,7 +65,7 @@ export function createToggleEffect(variable: string, path?: string): ToggleVaria
   return {
     type: BuiltInEffectType.toggle,
     variable,
-    path
+    path,
   };
 }
 
@@ -69,7 +77,7 @@ export function createPushEffect(array: string, value: any, path?: string): Push
     type: BuiltInEffectType.push,
     array,
     value,
-    path
+    path,
   };
 }
 
@@ -77,15 +85,15 @@ export function createPushEffect(array: string, value: any, path?: string): Push
  * Vytvoří efekt pro odstranění hodnoty z pole
  */
 export function createRemoveEffect(
-    array: string,
-    value: any,
-    options: { byIndex?: boolean; path?: string; equalityFn?: (a: any, b: any) => boolean } = {}
+  array: string,
+  value: any,
+  options: { byIndex?: boolean; path?: string; equalityFn?: (a: any, b: any) => boolean } = {}
 ): RemoveFromArrayEffect {
   return {
     type: BuiltInEffectType.remove,
     array,
     value,
-    ...options
+    ...options,
   };
 }
 
@@ -95,7 +103,7 @@ export function createRemoveEffect(
 export function createBatchEffect(effects: Effect[]): BatchEffect {
   return {
     type: BuiltInEffectType.batch,
-    effects
+    effects,
   };
 }
 
@@ -105,7 +113,7 @@ export function createBatchEffect(effects: Effect[]): BatchEffect {
 export function createSequenceEffect(effects: Effect[]): SequenceEffect {
   return {
     type: BuiltInEffectType.sequence,
-    effects
+    effects,
   };
 }
 
@@ -113,15 +121,15 @@ export function createSequenceEffect(effects: Effect[]): SequenceEffect {
  * Vytvoří efekt pro podmíněné provedení efektů
  */
 export function createConditionalEffect(
-    condition: (state: GameState) => boolean,
-    thenEffects: Effect[],
-    elseEffects?: Effect[]
+  condition: (state: GameState) => boolean,
+  thenEffects: Effect[],
+  elseEffects?: Effect[]
 ): ConditionalEffect {
   return {
     type: BuiltInEffectType.conditional,
     condition,
     thenEffects,
-    elseEffects
+    elseEffects,
   };
 }
 
@@ -129,13 +137,13 @@ export function createConditionalEffect(
  * Vytvoří efekt pro opakované provedení jiného efektu
  */
 export function createRepeatEffect(
-    effect: Effect,
-    count: number | ((state: GameState) => number)
+  effect: Effect,
+  count: number | ((state: GameState) => number)
 ): RepeatEffect {
   return {
     type: BuiltInEffectType.repeat,
     count,
-    effect
+    effect,
   };
 }
 
@@ -156,7 +164,10 @@ export function toSequenceEffect(effects: Effect[]): SequenceEffect {
 /**
  * Zkontroluje, zda je efekt určitého typu
  */
-export function isEffectOfType<T extends Effect>(effect: Effect, type: BuiltInEffectType | string): effect is T {
+export function isEffectOfType<T extends Effect>(
+  effect: Effect,
+  type: BuiltInEffectType | string
+): effect is T {
   return effect.type === type;
 }
 

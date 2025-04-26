@@ -8,11 +8,11 @@ import { GameEventType, EventListener } from './types';
  * @returns Funkce, která volá všechny zadané posluchače
  */
 export function combineListeners(listeners: EventListener[]): EventListener {
-    return (data: any) => {
-        for (const listener of listeners) {
-            listener(data);
-        }
-    };
+  return (data: any) => {
+    for (const listener of listeners) {
+      listener(data);
+    }
+  };
 }
 
 /**
@@ -23,14 +23,14 @@ export function combineListeners(listeners: EventListener[]): EventListener {
  * @returns Nový posluchač s filtrem
  */
 export function createFilteredListener(
-    listener: EventListener,
-    filter: (data: any) => boolean
+  listener: EventListener,
+  filter: (data: any) => boolean
 ): EventListener {
-    return (data: any) => {
-        if (filter(data)) {
-            listener(data);
-        }
-    };
+  return (data: any) => {
+    if (filter(data)) {
+      listener(data);
+    }
+  };
 }
 
 /**
@@ -43,23 +43,23 @@ export function createFilteredListener(
  * @returns Nový posluchač, který se sám odregistruje
  */
 export function createCountLimitedListener(
-    emitter: EventEmitter,
-    eventType: GameEventType,
-    listener: EventListener,
-    count: number
+  emitter: EventEmitter,
+  eventType: GameEventType,
+  listener: EventListener,
+  count: number
 ): EventListener {
-    let callCount = 0;
+  let callCount = 0;
 
-    const wrappedListener: EventListener = (data: any) => {
-        listener(data);
-        callCount++;
+  const wrappedListener: EventListener = (data: any) => {
+    listener(data);
+    callCount++;
 
-        if (callCount >= count) {
-            emitter.off(eventType, wrappedListener);
-        }
-    };
+    if (callCount >= count) {
+      emitter.off(eventType, wrappedListener);
+    }
+  };
 
-    return wrappedListener;
+  return wrappedListener;
 }
 
 /**
@@ -69,18 +69,15 @@ export function createCountLimitedListener(
  * @param wait Čekací doba v milisekundách
  * @returns Debounced posluchač
  */
-export function createDebouncedListener(
-    listener: EventListener,
-    wait: number
-): EventListener {
-    let timeout: any = null;
+export function createDebouncedListener(listener: EventListener, wait: number): EventListener {
+  let timeout: any = null;
 
-    return (data: any) => {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => {
-            listener(data);
-        }, wait);
-    };
+  return (data: any) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      listener(data);
+    }, wait);
+  };
 }
 
 /**
@@ -90,29 +87,26 @@ export function createDebouncedListener(
  * @param limit Minimální interval mezi voláními v milisekundách
  * @returns Throttled posluchač
  */
-export function createThrottledListener(
-    listener: EventListener,
-    limit: number
-): EventListener {
-    let waiting = false;
-    let lastData: any = null;
+export function createThrottledListener(listener: EventListener, limit: number): EventListener {
+  let waiting = false;
+  let lastData: any = null;
 
-    return (data: any) => {
-        if (!waiting) {
-            listener(data);
-            waiting = true;
-            setTimeout(() => {
-                waiting = false;
-                if (lastData !== null) {
-                    const currentData = lastData;
-                    lastData = null;
-                    listener(currentData);
-                }
-            }, limit);
-        } else {
-            lastData = data;
+  return (data: any) => {
+    if (!waiting) {
+      listener(data);
+      waiting = true;
+      setTimeout(() => {
+        waiting = false;
+        if (lastData !== null) {
+          const currentData = lastData;
+          lastData = null;
+          listener(currentData);
         }
-    };
+      }, limit);
+    } else {
+      lastData = data;
+    }
+  };
 }
 
 /**
@@ -122,9 +116,9 @@ export function createThrottledListener(
  * @returns Asynchronní posluchač
  */
 export function createAsyncListener(listener: EventListener): EventListener {
-    return (data: any) => {
-        setTimeout(() => {
-            listener(data);
-        }, 0);
-    };
+  return (data: any) => {
+    setTimeout(() => {
+      listener(data);
+    }, 0);
+  };
 }

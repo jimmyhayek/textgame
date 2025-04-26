@@ -9,18 +9,18 @@ export { createDefaultEffectProcessors } from './processors';
 
 // Export utilit
 export {
-    createSetEffect,
-    createIncrementEffect,
-    createDecrementEffect,
-    createToggleEffect,
-    createPushEffect,
-    createRemoveEffect,
-    createBatchEffect,
-    createSequenceEffect,
-    createConditionalEffect,
-    createRepeatEffect,
-    toBatchEffect,
-    toSequenceEffect,
-    isEffectOfType,
-    isEffectFromNamespace
+  createSetEffect,
+  createIncrementEffect,
+  createDecrementEffect,
+  createToggleEffect,
+  createPushEffect,
+  createRemoveEffect,
+  createBatchEffect,
+  createSequenceEffect,
+  createConditionalEffect,
+  createRepeatEffect,
+  toBatchEffect,
+  toSequenceEffect,
+  isEffectOfType,
+  isEffectFromNamespace,
 } from './utils';

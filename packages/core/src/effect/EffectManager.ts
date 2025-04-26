@@ -93,7 +93,11 @@ export class EffectManager {
    * @param processor Funkce pro zpracování efektu
    * @param namespace Jmenný prostor (volitelný)
    */
-  public registerEffectProcessor(effectType: EffectType, processor: EffectProcessor, namespace?: string): void {
+  public registerEffectProcessor(
+    effectType: EffectType,
+    processor: EffectProcessor,
+    namespace?: string
+  ): void {
     const fullType = this.getFullEffectType(effectType, namespace);
     this.effectProcessors.set(fullType, processor);
   }
@@ -116,7 +120,10 @@ export class EffectManager {
    * @param processors Objekt mapující typy efektů na procesory
    * @param namespace Jmenný prostor (volitelný)
    */
-  public registerEffectProcessors(processors: Record<string, EffectProcessor>, namespace?: string): void {
+  public registerEffectProcessors(
+    processors: Record<string, EffectProcessor>,
+    namespace?: string
+  ): void {
     for (const [type, processor] of Object.entries(processors)) {
       this.registerEffectProcessor(type as EffectType, processor, namespace);
     }

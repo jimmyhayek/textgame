@@ -1,225 +1,225 @@
 import { produce } from '../utils/immer';
+import { ContentRegistry, ContentLoaderOptions } from './types';
 
 /**
- * Interface pro definování content registry s lazy-loading podporou
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
- */
-export interface ContentRegistry<T, K extends string = string> {
-    [key: string]: T | (() => Promise<T | { default: T }>);
-}
-
-/**
- * Konfigurační možnosti pro content loader
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
- */
-export interface ContentLoaderOptions<T extends object, K extends string = string> {
-    /** Počáteční registry obsahu */
-    initialRegistry?: ContentRegistry<T, K>;
-}
-
-/**
- * Generický loader pro herní obsah s podporou lazy-loadingu
- * @template T Typ načítaného obsahu
- * @template K Typ identifikátoru obsahu (obvykle string)
+ * A generic loader for game content (like scenes, items, etc.)
+ * with support for caching and lazy-loading via dynamic imports or async functions.
+ *
+ * Automatically injects a `_key` property containing the original registry key
+ * into loaded content objects (if the content is an object).
+ *
+ * @template T The type of the content being loaded (should extend object for _key injection).
+ * @template K The type of the content identifier key (defaults to string).
  */
 export class GenericContentLoader<T extends object, K extends string = string> {
-    /** Cache načteného obsahu */
-    private loadedContent: Map<string, T> = new Map();
+  /** Cache for already loaded content items, mapped by their key. */
+  private loadedContent: Map<string, T> = new Map();
 
-    /** Promise pro obsah, který se právě načítá */
-    private loadingPromises: Map<string, Promise<T>> = new Map();
+  /** Stores promises for content items that are currently being loaded to prevent duplicate loading attempts. */
+  private loadingPromises: Map<string, Promise<T>> = new Map();
 
-    /** Registry definic obsahu s podporou lazy-loadingu */
-    private registry: ContentRegistry<T, K> = {} as ContentRegistry<T, K>;
+  /** The registry containing content definitions or lazy-loading functions. */
+  private registry: ContentRegistry<T, K> = {} as ContentRegistry<T, K>;
 
-    /**
-     * Vytvoří nový content loader
-     * @param options Konfigurační možnosti loaderu
-     */
-    constructor(options: ContentLoaderOptions<T, K> = {}) {
-        const { initialRegistry = {} as ContentRegistry<T, K> } = options;
-        this.registry = { ...initialRegistry };
+  /**
+   * Creates a new GenericContentLoader instance.
+   * @param options Configuration options for the loader.
+   */
+  constructor(options: ContentLoaderOptions<T, K> = {}) {
+    const { initialRegistry = {} as ContentRegistry<T, K> } = options;
+    this.registry = { ...initialRegistry }; // Shallow copy initial registry
+  }
+
+  /**
+   * Registers multiple content definitions with the loader, merging them
+   * with the existing registry.
+   * @param registry A ContentRegistry containing definitions or lazy-loading functions.
+   */
+  public registerContent(registry: ContentRegistry<T, K>): void {
+    // Using produce for potential future complex merging logic, although Object.assign is sufficient here.
+    this.registry = produce(this.registry, (draft) => {
+      Object.assign(draft, registry);
+    });
+    // Alternative simple merge:
+    // this.registry = { ...this.registry, ...registry };
+  }
+
+  /**
+   * Alias for `registerContent`. Registers all content definitions from the provided registry.
+   * @param registry A ContentRegistry containing definitions or lazy-loading functions.
+   */
+  public registerAll(registry: ContentRegistry<T, K>): void {
+    this.registerContent(registry);
+  }
+
+  /**
+   * Loads a content item by its key.
+   * Handles both directly defined content and lazy-loaded content (functions returning Promises).
+   * Caches loaded content and manages concurrent loading attempts.
+   * Injects a `_key` property into the loaded content if it's an object.
+   *
+   * @param key The unique key identifying the content item to load.
+   * @returns A Promise that resolves with the loaded content item.
+   * @throws {Error} If content with the specified key is not found in the registry.
+   * @throws {Error} If lazy-loading fails.
+   */
+  public async loadContent(key: string): Promise<T> {
+    // Return from cache if already loaded
+    if (this.loadedContent.has(key)) {
+      return this.loadedContent.get(key)!;
     }
 
-    /**
-     * Registruje definice obsahu do loaderu
-     * @param registry Registry s definicemi nebo funkcemi pro lazy-loading
-     */
-    public registerContent(registry: ContentRegistry<T, K>): void {
-        this.registry = produce(this.registry, (draft) => {
-            Object.assign(draft, registry);
-        });
+    // Return existing promise if currently loading
+    if (this.loadingPromises.has(key)) {
+      return this.loadingPromises.get(key)!;
     }
 
-    /**
-     * Registruje všechen obsah z registry
-     * @param registry Registry s definicemi nebo funkcemi pro lazy-loading
-     */
-    public registerAll(registry: ContentRegistry<T, K>): void {
-        this.registerContent(registry);
+    const contentDefOrImport = this.registry[key];
+
+    if (!contentDefOrImport) {
+      throw new Error(`Content with key "${key}" not found in registry`);
     }
 
-    /**
-     * Načte obsah podle klíče, podporuje jak okamžitý, tak lazy-loaded obsah
-     * @param key Klíč obsahu
-     * @returns Promise, který se vyřeší načteným obsahem
-     * @throws Error pokud obsah s daným klíčem není v registry
-     */
-    public async loadContent(key: string): Promise<T> {
-        // Vrátit z cache, pokud již je načten
-        if (this.loadedContent.has(key)) {
-            return this.loadedContent.get(key)!;
-        }
+    let loadPromise: Promise<T>;
 
-        // Vrátit existující promise, pokud se již načítá
-        if (this.loadingPromises.has(key)) {
-            return this.loadingPromises.get(key)!;
-        }
+    if (typeof contentDefOrImport === 'function') {
+      // Handle lazy-loaded content
+      const loadFunction = contentDefOrImport as () => Promise<T | { default: T }>;
+      loadPromise = loadFunction().then((moduleOrContent): T => {
+        // Check for ES module default export or direct content
+        const content = this.isModuleWithDefault(moduleOrContent) ? moduleOrContent.default : moduleOrContent;
 
-        const contentDefOrImport = this.registry[key];
+        // Add _key to the loaded content if it's an object
+        // Note: This modifies the loaded content instance.
+        const enhancedContent = typeof content === 'object' && content !== null
+            ? { ...content, _key: key }
+            : content;
 
-        if (!contentDefOrImport) {
-            throw new Error(`Content with key "${key}" not found in registry`);
-        }
+        this.loadedContent.set(key, enhancedContent);
+        // Remove promise from loadingPromises map upon successful load
+        this.loadingPromises.delete(key);
+        return enhancedContent;
+      }).catch(error => {
+        // Remove promise from loadingPromises map even on error
+        this.loadingPromises.delete(key);
+        console.error(`Failed to load content for key "${key}":`, error);
+        // Re-throw the error to allow callers (like preloadContent) to handle it
+        throw error;
+      });
 
-        let loadPromise: Promise<T>;
+      // Store the promise ONLY if it represents actual async loading
+      this.loadingPromises.set(key, loadPromise);
 
-        if (typeof contentDefOrImport === 'function') {
-            // Zpracování lazy-loaded obsahu
-            const loadFunction = contentDefOrImport as () => Promise<T | { default: T }>;
-            loadPromise = loadFunction().then((module): T => {
-                // Kontrola, zda máme default export (ES module) nebo přímý obsah
-                const content = this.isModuleWithDefault(module) ? module.default : module;
+    } else {
+      // Handle directly defined content
+      // Add _key if it's an object
+      const content = typeof contentDefOrImport === 'object'
+          ? { ...contentDefOrImport, _key: key }
+          : contentDefOrImport;
 
-                // Přidáme _key do načteného obsahu
-                const enhancedContent = typeof content === 'object' && content !== null
-                    ? { ...content, _key: key }
-                    : content;
-
-                this.loadedContent.set(key, enhancedContent);
-                // Odstraníme promise z loadingPromises po úspěšném načtení
-                this.loadingPromises.delete(key);
-                return enhancedContent;
-            }).catch(error => {
-                // Odstraníme promise z loadingPromises i v případě chyby
-                this.loadingPromises.delete(key);
-                console.error(`Failed to load content for key "${key}":`, error);
-                // Znovu vyhodíme chybu, aby ji mohl zachytit volající (např. preloadContent)
-                throw error;
-            });
-        } else {
-            // Zpracování přímého obsahu
-            const content = typeof contentDefOrImport === 'object' && contentDefOrImport !== null
-                ? { ...contentDefOrImport, _key: key }
-                : contentDefOrImport;
-
-            loadPromise = Promise.resolve(content);
-            this.loadedContent.set(key, content);
-        }
-
-        // Uložíme promise POUZE pokud se jedná o skutečné načítání (lazy-load)
-        if (typeof contentDefOrImport === 'function') {
-            this.loadingPromises.set(key, loadPromise);
-        }
-
-        return loadPromise;
+      loadPromise = Promise.resolve(content);
+      this.loadedContent.set(key, content);
     }
 
-    /**
-     * Kontroluje, zda obsah s daným klíčem existuje v registry
-     * @param key Klíč obsahu
-     * @returns True pokud obsah existuje, false jinak
-     */
-    public hasContent(key: string): boolean {
-        return key in this.registry;
+    return loadPromise;
+  }
+
+  /**
+   * Checks if content with the given key exists in the registry.
+   * Does not check if the content is already loaded or currently loading.
+   * @param key The key of the content item.
+   * @returns `true` if the content key is registered, `false` otherwise.
+   */
+  public hasContent(key: string): boolean {
+    return key in this.registry;
+  }
+
+  /**
+   * Gets an array of all content keys currently registered with this loader.
+   * @returns An array of content keys.
+   */
+  public getContentKeys(): string[] {
+    return Object.keys(this.registry);
+  }
+
+  /**
+   * Preloads content items by their keys. Useful for loading assets upfront.
+   * If a key refers to already loaded content, it's skipped.
+   * If a key refers to lazy-loaded content, its loading process is initiated.
+   *
+   * @param keys An optional array of content keys to preload. If omitted,
+   *             attempts to preload all *lazy-loaded* content items
+   *             that are not already loaded or loading.
+   * @returns A Promise that resolves when all requested items are loaded,
+   *          or rejects if *any* of the loading attempts fail.
+   * @throws {Error} If loading of any specified item fails.
+   */
+  public async preloadContent(keys?: string[]): Promise<void> {
+    let keysToLoad: string[];
+
+    if (keys) {
+      // If keys are specified, filter only those present in the registry
+      keysToLoad = keys.filter(key => this.hasContent(key));
+    } else {
+      // If no keys specified, find all registered lazy-loading functions
+      // that haven't been loaded or aren't currently loading.
+      keysToLoad = this.getContentKeys().filter(key =>
+          typeof this.registry[key] === 'function' &&
+          !this.loadedContent.has(key) &&
+          !this.loadingPromises.has(key) // Don't re-trigger loading
+      );
     }
 
-    /**
-     * Získá všechny klíče obsahu registrované v loaderu
-     * @returns Pole klíčů obsahu
-     */
-    public getContentKeys(): string[] {
-        return Object.keys(this.registry);
+    if (keysToLoad.length === 0) {
+      // Nothing to preload
+      return Promise.resolve();
     }
 
-    /**
-     * Předem načte obsah podle klíčů.
-     * Pokud klíč odkazuje na již načtený obsah, nic se neděje.
-     * Pokud klíč odkazuje na lazy-loaded obsah, spustí jeho načítání.
-     *
-     * @param keys Volitelné pole klíčů obsahu k načtení. Pokud není uvedeno,
-     *             pokusí se načíst veškerý *lazy-loaded* obsah registrovaný v loaderu.
-     * @returns Promise, který se vyřeší, když jsou všechny požadované položky načteny (nebo jejich načítání selhalo).
-     *          Promise bude *rejected*, pokud načtení *alespoň jedné* položky selže.
-     * @throws Error pokud načtení některé z položek selže.
-     */
-    public async preloadContent(keys?: string[]): Promise<void> {
-        let keysToLoad: string[];
+    console.log(`[ContentLoader] Preloading content for keys: ${keysToLoad.join(', ')}`);
 
-        if (keys) {
-            // Pokud jsou klíče specifikovány, filtrujeme jen ty, které jsou v registry
-            keysToLoad = keys.filter(key => this.hasContent(key));
-        } else {
-            // Pokud nejsou klíče specifikovány, vezmeme všechny klíče z registry,
-            // které odpovídají lazy-loading funkcím a ještě nebyly načteny.
-            keysToLoad = this.getContentKeys().filter(key =>
-                typeof this.registry[key] === 'function' &&
-                !this.loadedContent.has(key) &&
-                !this.loadingPromises.has(key) // Nepokoušíme se znovu načítat, co se už načítá
-            );
-        }
+    // Create an array of promises by calling loadContent for each key.
+    // loadContent intelligently uses cache or existing loading promises.
+    const preloadPromises = keysToLoad.map(key => this.loadContent(key));
 
-        if (keysToLoad.length === 0) {
-            // Není co načítat
-            return Promise.resolve();
-        }
-
-        console.log(`Preloading content for keys: ${keysToLoad.join(', ')}`);
-
-        // Vytvoříme pole promises voláním loadContent pro každý klíč.
-        // loadContent() inteligentně použije cache nebo existující loading promises.
-        const preloadPromises = keysToLoad.map(key => this.loadContent(key));
-
-        // Použijeme Promise.all ke spuštění všech načítání paralelně.
-        // Promise.all se rejectne, pokud jakýkoli z vnitřních promises selže.
-        try {
-            await Promise.all(preloadPromises);
-            console.log(`Successfully preloaded content for keys: ${keysToLoad.join(', ')}`);
-        } catch (error) {
-            // Chyba byla již zalogována v loadContent, zde ji jen přepošleme dál
-            console.error(`Error occurred during preloading content.`);
-            throw error; // Umožní volajícímu zjistit, že preload selhal
-        }
+    // Use Promise.all to run all loading operations concurrently.
+    // It rejects if any of the inner promises reject.
+    try {
+      await Promise.all(preloadPromises);
+      console.log(`[ContentLoader] Successfully preloaded content for keys: ${keysToLoad.join(', ')}`);
+    } catch (error) {
+      // The error was already logged in loadContent's catch block.
+      console.error(`[ContentLoader] Error occurred during preloading content.`);
+      throw error; // Re-throw to signal failure to the caller
     }
+  }
 
-    /**
-     * Získá podkladový registry obsahu
-     * @returns Aktuální registry obsahu
-     */
-    public getRegistry(): ContentRegistry<T, K> {
-        return this.registry;
-    }
+  /**
+   * Retrieves the underlying content registry.
+   * @returns The current content registry.
+   */
+  public getRegistry(): ContentRegistry<T, K> {
+    return this.registry;
+  }
 
-    /**
-     * Vyčistí cache načteného obsahu a běžících načítání.
-     * Obsah bude znovu načten při příštím požadavku (loadContent nebo preloadContent).
-     */
-    public clearCache(): void {
-        this.loadedContent.clear();
-        this.loadingPromises.clear();
-        console.log('Content loader cache cleared.');
-    }
+  /**
+   * Clears the cache of loaded content items and cancels tracking of
+   * currently loading items. Content will be re-loaded on the next request
+   * (via `loadContent` or `preloadContent`).
+   */
+  public clearCache(): void {
+    this.loadedContent.clear();
+    this.loadingPromises.clear();
+    console.log('[ContentLoader] Content loader cache cleared.');
+  }
 
-    /**
-     * Type guard pro kontrolu, zda objekt má default export
-     * @param obj Objekt ke kontrole
-     * @returns True pokud objekt má default vlastnost typu T
-     * @private
-     */
-    private isModuleWithDefault(obj: any): obj is { default: T } {
-        // Přidána kontrola, zda obj není null, a zda 'default' existuje
-        return obj && typeof obj === 'object' && true && 'default' in obj;
-    }
+  /**
+   * Type guard to check if an object is likely an ES module with a default export.
+   * @param obj The object to check.
+   * @returns `true` if the object has a 'default' property, `false` otherwise.
+   * @private
+   */
+  private isModuleWithDefault(obj: any): obj is { default: T } {
+    // Check if obj is a non-null object and has the 'default' key
+    return obj && typeof obj === 'object' && 'default' in obj;
+  }
 }

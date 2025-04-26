@@ -7,10 +7,10 @@ export { MemoryStorage } from './MemoryStorage';
 
 // Export utilit
 export {
-    createSaveManager,
-    validateSaveData,
-    generateSaveId,
-    formatPlayTime,
-    exportSaveToFile,
-    importSaveFromFile
+  createSaveManager,
+  validateSaveData,
+  generateSaveId,
+  formatPlayTime,
+  exportSaveToFile,
+  importSaveFromFile,
 } from './utils';

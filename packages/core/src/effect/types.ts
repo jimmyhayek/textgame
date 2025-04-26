@@ -19,7 +19,7 @@ export enum BuiltInEffectType {
   batch = 'batch',
   sequence = 'sequence',
   conditional = 'conditional',
-  repeat = 'repeat'
+  repeat = 'repeat',
 }
 
 /**

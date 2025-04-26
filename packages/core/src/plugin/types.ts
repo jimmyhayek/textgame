@@ -23,7 +23,7 @@ export enum PluginEvents {
   REGISTERED = 'plugin:registered',
   UNREGISTERED = 'plugin:unregistered',
   INITIALIZED = 'plugin:initialized',
-  ERROR = 'plugin:error'
+  ERROR = 'plugin:error',
 }
 
 /** Data předávaná při události registrace pluginu */

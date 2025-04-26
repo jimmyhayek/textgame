@@ -6,7 +6,7 @@ import {
   PluginRegisteredEventData,
   PluginUnregisteredEventData,
   PluginInitializedEventData,
-  PluginErrorEventData
+  PluginErrorEventData,
 } from './types';
 import { GameEngine } from '../engine/GameEngine';
 
@@ -49,17 +49,13 @@ export class PluginManager {
    * @param eventEmitter Event emitter pro události
    * @param options Možnosti konfigurace
    */
-  constructor(
-      engine: GameEngine,
-      eventEmitter: EventEmitter,
-      options: PluginRegistryOptions = {}
-  ) {
+  constructor(engine: GameEngine, eventEmitter: EventEmitter, options: PluginRegistryOptions = {}) {
     this.engine = engine;
     this.eventEmitter = eventEmitter;
     this.options = {
       autoActivate: true,
       allowOverride: false,
-      ...options
+      ...options,
     };
   }
 
@@ -70,10 +66,7 @@ export class PluginManager {
    * @param activate Zda aktivovat plugin ihned po registraci
    * @returns Promise který se vyřeší na true, pokud byl plugin úspěšně registrován
    */
-  public async registerPlugin(
-      plugin: Plugin,
-      activate?: boolean
-  ): Promise<boolean> {
+  public async registerPlugin(plugin: Plugin, activate?: boolean): Promise<boolean> {
     const shouldActivate = activate ?? this.options.autoActivate;
 
     // Kontrola, zda plugin s tímto názvem již existuje
@@ -88,7 +81,7 @@ export class PluginManager {
     // Emitování události registrace
     this.eventEmitter.emit(PluginEvents.REGISTERED, {
       name: plugin.name,
-      plugin
+      plugin,
     } as PluginRegisteredEventData);
 
     // Aktivace pluginu, pokud je požadováno
@@ -106,10 +99,7 @@ export class PluginManager {
    * @param activate Zda aktivovat pluginy ihned po registraci
    * @returns Promise který se vyřeší na počet úspěšně registrovaných pluginů
    */
-  public async registerPlugins(
-      plugins: Plugin[],
-      activate?: boolean
-  ): Promise<number> {
+  public async registerPlugins(plugins: Plugin[], activate?: boolean): Promise<number> {
     let successCount = 0;
 
     for (const plugin of plugins) {
@@ -151,7 +141,7 @@ export class PluginManager {
       // Emitování události inicializace
       this.eventEmitter.emit(PluginEvents.INITIALIZED, {
         name: pluginName,
-        plugin
+        plugin,
       } as PluginInitializedEventData);
 
       console.log(`Plugin '${pluginName}' successfully initialized.`);
@@ -162,7 +152,7 @@ export class PluginManager {
         name: pluginName,
         plugin,
         error,
-        phase: 'initialize'
+        phase: 'initialize',
       } as PluginErrorEventData);
 
       console.error(`Error initializing plugin '${pluginName}':`, error);
@@ -199,7 +189,7 @@ export class PluginManager {
           name: pluginName,
           plugin,
           error,
-          phase: 'destroy'
+          phase: 'destroy',
         } as PluginErrorEventData);
 
         console.error(`Error destroying plugin '${pluginName}':`, error);
@@ -240,7 +230,7 @@ export class PluginManager {
 
     // Emitování události odregistrace
     this.eventEmitter.emit(PluginEvents.UNREGISTERED, {
-      name: pluginName
+      name: pluginName,
     } as PluginUnregisteredEventData);
 
     console.log(`Plugin '${pluginName}' successfully unregistered.`);

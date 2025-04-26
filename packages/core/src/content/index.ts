@@ -1,17 +1,17 @@
-// Export typů
+// --- Types ---
 export * from './types';
 
-// Export hlavních tříd
+// --- Classes ---
 export { GenericContentLoader } from './GenericContentLoader';
 export { LoaderRegistry } from './LoaderRegistry';
 
-// Export utilit
+// --- Utilities ---
 export {
-    createContentLoader,
-    defineContent,
-    defineScenes,
-    mergeContentRegistries,
-    generateContentKey,
-    extractContentKeys,
-    mapContentRegistry
+  createContentLoader,
+  defineContent,
+  defineScenes,
+  mergeContentRegistries,
+  generateContentKey,
+  extractContentKeys,
+  mapContentRegistry
 } from './utils';

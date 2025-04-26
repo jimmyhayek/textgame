@@ -10,30 +10,30 @@ import { GameState } from '../state/types';
  * Možnosti pro vytvoření herního enginu
  */
 export interface CreateGameEngineOptions {
-    /**
-     * Definice obsahu k registraci
-     */
-    content?: ContentDefinition<any>[];
+  /**
+   * Definice obsahu k registraci
+   */
+  content?: ContentDefinition<any>[];
 
-    /**
-     * Pluginy k registraci
-     */
-    plugins?: Plugin[];
+  /**
+   * Pluginy k registraci
+   */
+  plugins?: Plugin[];
 
-    /**
-     * Počáteční stav hry
-     */
-    initialState?: Partial<GameState>;
+  /**
+   * Počáteční stav hry
+   */
+  initialState?: Partial<GameState>;
 
-    /**
-     * Vlastní content loader pro scény
-     */
-    sceneLoader?: GenericContentLoader<Scene>;
+  /**
+   * Vlastní content loader pro scény
+   */
+  sceneLoader?: GenericContentLoader<Scene>;
 
-    /**
-     * Další možnosti konfigurace enginu
-     */
-    engineOptions?: Partial<GameEngineOptions>;
+  /**
+   * Další možnosti konfigurace enginu
+   */
+  engineOptions?: Partial<GameEngineOptions>;
 }
 
 /**
@@ -43,26 +43,26 @@ export interface CreateGameEngineOptions {
  * @returns Nová instance herního enginu
  */
 export function createGameEngine(options: CreateGameEngineOptions = {}): GameEngine {
-    const {
-        content = [],
-        plugins = [],
-        initialState = {},
-        sceneLoader = new GenericContentLoader<Scene>(),
-        engineOptions = {}
-    } = options;
+  const {
+    content = [],
+    plugins = [],
+    initialState = {},
+    sceneLoader = new GenericContentLoader<Scene>(),
+    engineOptions = {},
+  } = options;
 
-    // Vytvoření enginu
-    const engine = new GameEngine({
-        sceneLoader,
-        initialState,
-        plugins,
-        ...engineOptions
-    });
+  // Vytvoření enginu
+  const engine = new GameEngine({
+    sceneLoader,
+    initialState,
+    plugins,
+    ...engineOptions,
+  });
 
-    // Registrace obsahu
-    for (const contentDef of content) {
-        engine.registerContent(contentDef);
-    }
+  // Registrace obsahu
+  for (const contentDef of content) {
+    engine.registerContent(contentDef);
+  }
 
-    return engine;
+  return engine;
 }

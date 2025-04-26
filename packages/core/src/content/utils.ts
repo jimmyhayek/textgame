@@ -1,8 +1,9 @@
-// src/content/utils.ts
-
-import { ContentRegistry, ContentDefinition } from './types';
-import { Scene } from '../scene/types'; // Assuming Scene is defined here
-import { GenericContentLoader, ContentLoaderOptions } from './GenericContentLoader'; // Import class and options interface
+// Import types using 'import type' from the central types file
+import type { ContentRegistry, ContentDefinition, ContentLoaderOptions } from './types';
+// Import Scene type (assuming it's exported from scene module index)
+import type { Scene } from '../scene';
+// Import the GenericContentLoader class (runtime value)
+import { GenericContentLoader } from './GenericContentLoader';
 
 /**
  * Factory function to create a new instance of `GenericContentLoader`.
@@ -13,7 +14,7 @@ import { GenericContentLoader, ContentLoaderOptions } from './GenericContentLoad
  * @returns A new instance of `GenericContentLoader<T, K>`.
  */
 export function createContentLoader<T extends object, K extends string = string>(
-    options?: ContentLoaderOptions<T, K> // Use options interface
+    options?: ContentLoaderOptions<T, K> // Use options interface from types.ts
 ): GenericContentLoader<T, K> {
   return new GenericContentLoader<T, K>(options);
 }
@@ -49,30 +50,38 @@ export function defineScenes(registry: ContentRegistry<Scene>): ContentDefinitio
 /**
  * Merges multiple content registries into a single new registry.
  * Later registries overwrite entries with the same key from earlier ones.
+ * Creates a new shallow copy; does not modify the original registries.
  *
  * @template T The type of content in the registries.
  * @template K The type of the content identifier key.
  * @param registries An array of `ContentRegistry` objects to merge.
  * @returns A new `ContentRegistry` containing all entries from the input registries.
  */
-export function mergeContentRegistries<T, K extends string = string>( // T doesn't strictly need `extends object` here
+export function mergeContentRegistries<T, K extends string = string>(
     ...registries: ContentRegistry<T, K>[]
 ): ContentRegistry<T, K> {
-  return Object.assign({}, ...registries); // Creates a new object with merged properties
+  // Object.assign creates a new object and merges properties shallowly.
+  return Object.assign({}, ...registries);
 }
 
 /**
  * Generates a normalized content key, typically used for hierarchical or path-based keys.
- * Joins parts with '/', removes duplicate slashes, and trims leading/trailing slashes.
+ * Joins parts with '/', removes duplicate slashes, filters empty parts, and trims leading/trailing slashes.
  *
- * @param parts String parts to join into a key. Empty parts are filtered out.
+ * @param parts String parts to join into a key. Empty or whitespace-only parts are filtered out.
  * @returns A normalized content key string.
  * @example
- * generateContentKey('items', ' potions ', '/healing') // Returns 'items/potions/healing'
+ * generateContentKey('items', ' potions ', '/healing', '', ' ') // Returns 'items/potions/healing'
+ * generateContentKey(' single ') // Returns 'single'
  */
 export function generateContentKey(...parts: string[]): string {
   // Filter out empty or whitespace-only parts
   const filteredParts = parts.filter(part => part && part.trim() !== '');
+
+  // Handle the case where no valid parts are provided
+  if (filteredParts.length === 0) {
+    return '';
+  }
 
   // Join with slash, replace multiple slashes with one, trim ends
   return filteredParts
@@ -89,23 +98,20 @@ export function generateContentKey(...parts: string[]): string {
  * @param registry The `ContentRegistry` object.
  * @returns An array of strings representing the keys in the registry.
  */
-export function extractContentKeys<T, K extends string = string>( // T doesn't strictly need `extends object` here
+export function extractContentKeys<T, K extends string = string>(
     registry: ContentRegistry<T, K>
 ): string[] {
   return Object.keys(registry);
 }
 
 /**
- * Transforms the values within a content registry using a mapping function,
- * preserving the structure (including lazy-loading functions).
- *
- * @template T The original type of content items in the registry (must extend object).
- * @template U The new type of content items after transformation (must extend object).
- * @template K The type of the content identifier key.
- * @param registry The source `ContentRegistry` to transform.
- * @param mapFn A function that takes the original content item and its key, and returns the transformed item.
- *              This function is applied *after* lazy-loading, if applicable.
- * @returns A new `ContentRegistry` with the transformed content items.
+ * Transformuje registry obsahu pomocí mapovací funkce
+ * @template T Původní typ obsahu
+ * @template U Nový typ obsahu
+ * @template K Typ klíče obsahu
+ * @param registry Původní registry obsahu
+ * @param mapFn Funkce pro transformaci každé položky
+ * @returns Transformovaný registry obsahu
  */
 export function mapContentRegistry<T extends object, U extends object, K extends string = string>(
     registry: ContentRegistry<T, K>,
@@ -115,22 +121,18 @@ export function mapContentRegistry<T extends object, U extends object, K extends
 
   for (const [key, value] of Object.entries(registry)) {
     if (typeof value === 'function') {
-      // Preserve lazy-loading capability for functions
+      // Pro lazy-loaded obsah
       result[key] = async () => {
-        // Await the original lazy loader
-        const loadedModuleOrContent = await (value as () => Promise<T | { default: T }})();
-      // Handle potential default export from ES modules
-      const actualContent = ('default' in loadedModuleOrContent && typeof loadedModuleOrContent.default !== 'undefined')
-          ? loadedModuleOrContent.default
-          : loadedModuleOrContent;
-      // Apply the mapping function to the resolved content
-      return mapFn(actualContent as T, key);
-    };
-  } else {
-    // Apply the mapping function directly to non-lazy content
-    result[key] = mapFn(value as T, key);
+        const loadedContent = await (value as Function)();
+        // Handle default export from ES modules
+        const actualContent = ('default' in loadedContent) ? loadedContent.default : loadedContent;
+        return mapFn(actualContent as T, key);
+      };
+    } else {
+      // Pro okamžitý obsah
+      result[key] = mapFn(value as T, key);
+    }
   }
-}
 
-return result;
+  return result;
 }

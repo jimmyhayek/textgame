@@ -70,6 +70,19 @@ export interface GameStateManagerOptions<
    * Stejně jako onBeforeSerialize, primárně patří do persistence vrstvy.
    */
   onAfterDeserialize?: (state: GameState<T>) => void;
+
+  /**
+   * Zda povolit funkci historie (Undo/Redo).
+   * Výchozí: true
+   */
+  historyEnabled?: boolean;
+
+  /**
+   * Maximální počet kroků historie (Undo), které se mají uchovávat.
+   * Limit 0 nebo záporné číslo efektivně vypne historii.
+   * Výchozí: 50
+   */
+  historyLimit?: number;
 }
 
 /**
@@ -77,9 +90,9 @@ export interface GameStateManagerOptions<
  */
 export interface StateChangedEvent<T extends Record<string, unknown> = Record<string, unknown>> {
   /**
-   * Předchozí stav (null při deserializaci)
+   * Předchozí stav (null při inicializaci nebo resetu/loadu)
    */
-  previousState: GameState<T> | null;
+  previousState: GameState<T> | null; // Modified to allow null
 
   /**
    * Nový stav
@@ -87,29 +100,53 @@ export interface StateChangedEvent<T extends Record<string, unknown> = Record<st
   newState: GameState<T>;
 
   /**
-   * Zdroj změny (např. 'effect', 'scene', 'plugin', 'deserialize', 'reset', atd.)
+   * Zdroj změny (např. 'update', 'setState', 'undo', 'redo', 'applyPersistentState', 'reset', atd.)
    */
   source?: string;
 }
 
 /**
- * Eventy emitované GameStateManagerem (runtime události)
+ * Data předávaná při události změny historie
  */
+export interface HistoryChangedEvent {
+  /**
+   * Zda je možné provést operaci Undo.
+   */
+  canUndo: boolean;
+  /**
+   * Zda je možné provést operaci Redo.
+   */
+  canRedo: boolean;
+  /**
+   * Aktuální počet kroků v undo stacku.
+   */
+  undoSize: number;
+  /**
+   * Aktuální počet kroků v redo stacku.
+   */
+  redoSize: number;
+}
+
+
+/**
+* Eventy emitované GameStateManagerem (runtime události)
+*/
 export interface GameStateManagerEvents<
-  T extends Record<string, unknown> = Record<string, unknown>,
+    T extends Record<string, unknown> = Record<string, unknown>,
 > {
   /**
-   * Emitováno při změně stavu
+   * Emitováno při změně stavu (výsledkem jakékoli operace měnící `this.state`).
    */
   stateChanged: StateChangedEvent<T>;
 
   /**
-   * Emitováno při změně perzistentních klíčů
+   * Emitováno při změně perzistentních klíčů.
    */
   persistentKeysChanged: { keys: string[] };
 
-  // Události související s persistencí (jako beforeSerialize/afterDeserialize/migrationApplied)
-  // by se nyní měly emitovat z StatePersistenceService nebo StateMigrationService,
-  // jak je definováno v src/state/persistence/types.ts.
-  // GameStateManager na ně může volitelně naslouchat, pokud je to potřeba.
+  /**
+   * Emitováno při změně stavu historie (po undo, redo, clearHistory,
+   * nebo po normální změně stavu, která ovlivní historii).
+   */
+  historyChanged: HistoryChangedEvent;
 }

@@ -15,9 +15,8 @@ import {
   AutoSaveDisabledEventData,
 } from './types';
 import { GameEngine } from '../engine/GameEngine';
-// EventEmitter a TypedEventEmitter už by neměly být potřeba přímo zde
-// import { EventEmitter } from '../event/EventEmitter';
-// import { TypedEventEmitter } from '../event/TypedEventEmmitter';
+import { GameEngineCoreEvents } from '../engine/types';
+
 import { SceneKey } from '../scene/types';
 import { GameStateManager } from '../state/GameStateManager';
 import { StateConverter } from '../state/persistence/StateConverter';
@@ -69,7 +68,8 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
 
   private setupEventListeners(): void {
     // Naslouchání na core události z enginu
-    this.engine.getCoreEventEmitter().on('gameStarted', () => {
+    // FIX: Use enum member instead of string literal
+    this.engine.getCoreEventEmitter().on(GameEngineCoreEvents.GAME_STARTED, () => {
       console.log('SaveManager: Game started event received. Resetting play time.');
       this.gameStartTime = Date.now();
       this.totalPlayTime = 0;
@@ -80,7 +80,7 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
       // Typ dat je z SaveEventMap
       if (data.success) {
         console.log(
-          'SaveManager: Game loaded event received. Setting play time from metadata and resetting start time.'
+            'SaveManager: Game loaded event received. Setting play time from metadata and resetting start time.'
         );
         this.gameStartTime = Date.now();
       }
@@ -97,7 +97,7 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
     }
 
     this.updatePlayTime();
-    const gameStateManager = this.engine.getStateManager<T>();
+    const gameStateManager = this.engine.getStateManager();
     const currentState = gameStateManager.getState();
     const persistentKeys = gameStateManager.getPersistentKeys();
 
@@ -197,7 +197,7 @@ export class SaveManager<T extends Record<string, unknown> = Record<string, unkn
     saveData = migratedSaveData;
 
     try {
-      const gameStateManager = this.engine.getStateManager<T>();
+      const gameStateManager = this.engine.getStateManager();
       // Získání typovaného emitteru pro persistenci z enginu
       const persistenceEmitter = this.engine.getPersistenceEventEmitter<T>();
 

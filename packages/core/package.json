@@ -31,6 +31,8 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "analyze": "npm run typecheck && npm run lint && npm run format:check",
     "prepublishOnly": "npm run lint && npm run test && npm run build"
   },
   "devDependencies": {

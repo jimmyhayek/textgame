@@ -16,9 +16,4 @@ export const CORE_PLUGIN_EVENTS = {
 // Export utilit
 export {
   createPlugin,
-  createCompositePlugin,
-  createLazyPlugin,
-  createConditionalPlugin,
-  createVersionedPlugin,
-  createDebouncedPlugin,
 } from './utils';

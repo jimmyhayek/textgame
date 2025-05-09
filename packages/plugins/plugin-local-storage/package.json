@@ -24,13 +24,13 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc && rollup -c",
-    "dev": "tsc --watch",
-    "test": "jest",
-    "lint": "eslint src --ext .ts",
-    "lint:fix": "eslint src --ext .ts --fix",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "build": "node_modules/.bin/tsc && rollup -c",
+    "dev": "node_modules/.bin/tsc --watch",
+    "test": "node_modules/.bin/jest",
+    "lint": "node_modules/.bin/eslint src --ext .ts",
+    "lint:fix": "node_modules/.bin/eslint src --ext .ts --fix",
+    "format": "node_modules/.bin/prettier --write \"src/**/*.ts\"",
+    "format:check": "node_modules/.bin/prettier --check \"src/**/*.ts\"",
     "prepublishOnly": "yarn lint && yarn test && yarn build"
   },
   "peerDependencies": {

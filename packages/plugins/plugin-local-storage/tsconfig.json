@@ -1,4 +1,3 @@
-// packages/plugin-commands/tsconfig.json
 {
   "compilerOptions": {
     "target": "ES2020",
@@ -12,9 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node"
   },
-  "paths": {
-    "@pabitel/core": ["../core/src"]
-  },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test", "examples"]
+  "exclude": [
+    "node_modules", "dist", "test", "examples"]
 }

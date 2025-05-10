@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="WEB_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/packages/core/coverage/lcov-report/core" />
+      <excludeFolder url="file://$MODULE_DIR$/packages/core/coverage/lcov-report/src/types" />
+      <excludeFolder url="file://$MODULE_DIR$/packages/core/coverage/lcov-report/src/utils" />
+      <excludeFolder url="file://$MODULE_DIR$/packages/core/coverage/lcov-report/utils" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>
